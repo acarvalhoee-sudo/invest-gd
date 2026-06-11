@@ -1,9 +1,3 @@
-/**
- * App.tsx
- * Roteamento da aplicação — sem autenticação
- * Abre diretamente no Dashboard
- */
-
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import MainLayout    from './layouts/MainLayout'

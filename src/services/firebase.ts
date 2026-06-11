@@ -1,9 +1,6 @@
 /**
- * firebase.ts
- * Inicialização do Firebase SDK — sem Authentication
- * Acesso direto ao Firestore para armazenamento dos estudos
+ * firebase.ts — sem Authentication
  */
-
 import { initializeApp, getApps, getApp } from 'firebase/app'
 import { getFirestore } from 'firebase/firestore'
 
@@ -16,10 +13,7 @@ const firebaseConfig = {
   appId:             import.meta.env.VITE_FIREBASE_APP_ID,
 }
 
-// Evita reinicializar em hot-reload
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp()
 
-/** Instância do Firestore */
 export const db = getFirestore(app)
-
 export default app

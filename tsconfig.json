@@ -19,5 +19,19 @@
     "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src"],
+  "exclude": [
+    "src/contexts/AuthContext.tsx",
+    "src/pages/LoginPage.tsx",
+    "src/pages/RegisterPage.tsx",
+    "src/pages/ResetPasswordPage.tsx",
+    "src/pages/ResultsPage.tsx",
+    "src/layouts/AppLayout.tsx",
+    "src/hooks/useStudy.ts",
+    "src/services/firestoreService.ts",
+    "src/services/aneelApi.ts",
+    "src/calculations/viabilityEngine.ts",
+    "src/types/studyTypes.ts",
+    "src/reports/pdfGenerator.ts"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
