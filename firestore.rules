@@ -1,0 +1,32 @@
+rules_version = '2';
+// INVEST GD — Regras Firestore (sem autenticação)
+// ATENÇÃO: regras abertas para desenvolvimento. Restrinja em produção.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Estudos — leitura e escrita pública (Fase 1)
+    match /studies/{studyId} {
+      allow read, write: if true;
+    }
+
+    // Resultados — para cálculos financeiros (Fase 2)
+    match /results/{id} {
+      allow read, write: if true;
+    }
+
+    // Tarifas — referência ANEEL (Fase 2)
+    match /tariffs/{id} {
+      allow read, write: if true;
+    }
+
+    // Relatórios (Fase 2)
+    match /reports/{id} {
+      allow read, write: if true;
+    }
+
+    // Configurações (Fase 2)
+    match /settings/{id} {
+      allow read, write: if true;
+    }
+  }
+}
