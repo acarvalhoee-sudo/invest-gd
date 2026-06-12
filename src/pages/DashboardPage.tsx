@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, Search, MoreHorizontal, Pencil, Copy, Trash2,
-  Zap, SunMedium, Droplets, Wind, RefreshCw,
+  Zap, SunMedium, Droplets, Wind, RefreshCw, Leaf,
   TrendingUp, Building2, CircleDollarSign, LayoutGrid,
   AlertCircle,
 } from 'lucide-react'
@@ -31,11 +31,14 @@ import {
 
 function FonteIcon({ fonte, className = 'w-4 h-4' }: { fonte: FonteGeracao; className?: string }) {
   switch (fonte) {
-    case 'solar':  return <SunMedium className={className} />
-    case 'cgh':    return <Droplets  className={className} />
-    case 'pch':    return <Droplets  className={className} />
-    case 'eolica': return <Wind      className={className} />
-    default:       return <Zap       className={className} />
+    case 'ufv':
+    case 'solar': return <SunMedium className={className} />
+    case 'cgh':
+    case 'pch':   return <Droplets  className={className} />
+    case 'eolica':return <Wind      className={className} />
+    case 'biomassa':
+    case 'biogas':return <Leaf      className={className} />
+    default:      return <Zap       className={className} />
   }
 }
 
@@ -86,18 +89,18 @@ export default function DashboardPage() {
     return studies.filter((s) => {
       const term = search.toLowerCase()
       const matchSearch =
-        s.dadosUsina.nomeEstudo.toLowerCase().includes(term) ||
-        s.dadosUsina.nomeUsina.toLowerCase().includes(term)
-      const matchFonte = filterFonte === 'all' || s.dadosUsina.fonte === filterFonte
+        s.ativo.nomeEstudo.toLowerCase().includes(term) ||
+        s.ativo.nomeUsina.toLowerCase().includes(term)
+      const matchFonte = filterFonte === 'all' || s.ativo.fonte === filterFonte
       return matchSearch && matchFonte
     })
   }, [studies, search, filterFonte])
 
   const stats = useMemo(() => {
-    const totalPotencia     = studies.reduce((s, e) => s + e.dadosUsina.potencia, 0)
-    const totalInvestimento = studies.reduce((s, e) => s + e.dadosUsina.investimentoTotal, 0)
+    const totalPotencia     = studies.reduce((s, e) => s + e.ativo.potencia, 0)
+    const totalInvestimento = studies.reduce((s, e) => s + e.capex.total, 0)
     const porFonte = studies.reduce<Record<string, number>>((acc, e) => {
-      acc[e.dadosUsina.fonte] = (acc[e.dadosUsina.fonte] ?? 0) + 1
+      acc[e.ativo.fonte] = (acc[e.ativo.fonte] ?? 0) + 1
       return acc
     }, {})
     return { totalPotencia, totalInvestimento, porFonte }
@@ -124,7 +127,7 @@ export default function DashboardPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Estudos de Viabilidade</h1>
-          <p className="page-subtitle">Gerencie e analise seus ativos de geração distribuída</p>
+          <p className="page-subtitle">Gerencie e analise seus ativos de geracao distribuida</p>
         </div>
         <Button onClick={() => navigate('/estudos/novo')} className="gap-2 shrink-0">
           <Plus className="w-4 h-4" />
@@ -138,25 +141,25 @@ export default function DashboardPage() {
             icon={<LayoutGrid className="w-4 h-4" />}
             label="Total de Estudos"
             value={studies.length.toString()}
-            sub={`${Object.keys(stats.porFonte).length} fonte${Object.keys(stats.porFonte).length !== 1 ? 's' : ''}`}
+            sub={`${Object.keys(stats.porFonte).length} tipo${Object.keys(stats.porFonte).length !== 1 ? 's' : ''} de fonte`}
           />
           <StatCard
             icon={<Building2 className="w-4 h-4" />}
-            label="Potência Total"
+            label="Potencia Total"
             value={`${stats.totalPotencia.toLocaleString('pt-BR')} kW`}
             sub="Capacidade instalada"
           />
           <StatCard
             icon={<CircleDollarSign className="w-4 h-4" />}
-            label="Investimento Total"
+            label="CAPEX Total"
             value={fmtCompact(stats.totalInvestimento)}
-            sub="Soma do portfólio"
+            sub="Soma do portfolio"
           />
           <StatCard
             icon={<TrendingUp className="w-4 h-4" />}
-            label="Média por Estudo"
+            label="Media por Estudo"
             value={fmtCompact(studies.length ? stats.totalInvestimento / studies.length : 0)}
-            sub="Investimento médio"
+            sub="CAPEX medio"
           />
         </div>
       )}
@@ -177,10 +180,13 @@ export default function DashboardPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas as fontes</SelectItem>
-            <SelectItem value="solar">Solar (UFV)</SelectItem>
+            <SelectItem value="ufv">UFV</SelectItem>
             <SelectItem value="cgh">CGH</SelectItem>
             <SelectItem value="pch">PCH</SelectItem>
             <SelectItem value="eolica">Eolica</SelectItem>
+            <SelectItem value="biomassa">Biomassa</SelectItem>
+            <SelectItem value="biogas">Biogas</SelectItem>
+            <SelectItem value="outros">Outros</SelectItem>
           </SelectContent>
         </Select>
         <Button variant="outline" size="icon" onClick={reload} title="Atualizar">
@@ -209,9 +215,9 @@ export default function DashboardPage() {
                 <th>Estudo / Usina</th>
                 <th>Fonte</th>
                 <th>Potencia</th>
-                <th>Custo Usina</th>
-                <th>Custo Rede</th>
-                <th>Investimento Total</th>
+                <th>Aquisicao</th>
+                <th>CAPEX Total</th>
+                <th>Tarifa Venda</th>
                 <th>Criado em</th>
                 <th className="text-right">Acoes</th>
               </tr>
@@ -262,7 +268,7 @@ export default function DashboardPage() {
         </div>
 
         {!loading && filtered.length > 0 && (
-          <div className="px-4 py-3 border-t border-border flex items-center justify-between">
+          <div className="px-4 py-3 border-t border-border">
             <p className="text-xs text-muted-foreground">
               {filtered.length} estudo{filtered.length !== 1 ? 's' : ''} encontrado{filtered.length !== 1 ? 's' : ''}
               {studies.length !== filtered.length && ` de ${studies.length} no total`}
@@ -276,7 +282,7 @@ export default function DashboardPage() {
           <DialogHeader>
             <DialogTitle>Excluir estudo</DialogTitle>
             <DialogDescription>
-              Esta acao nao pode ser desfeita. O estudo sera removido permanentemente do Firestore.
+              Esta acao nao pode ser desfeita. O estudo sera removido permanentemente.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 mt-2">
@@ -292,41 +298,44 @@ export default function DashboardPage() {
 }
 
 function StudyRow({ study, duplicating, onEdit, onDuplicate, onDelete }: {
-  study:       Study
-  duplicating: boolean
-  onEdit:      () => void
-  onDuplicate: () => void
-  onDelete:    () => void
+  study: Study; duplicating: boolean
+  onEdit: () => void; onDuplicate: () => void; onDelete: () => void
 }) {
-  const u = study.dadosUsina
+  const a = study.ativo
+  const fonteKey = (a.fonte === 'solar' ? 'ufv' : a.fonte) as FonteGeracao
+
+  const aquisicaoLabel: Record<string, string> = {
+    compra_ativo: 'Compra de Ativo',
+    greenfield:   'Greenfield',
+  }
 
   return (
     <tr>
       <td>
         <div>
-          <p className="font-medium text-foreground text-sm leading-tight">{u.nomeEstudo}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{u.nomeUsina}</p>
+          <p className="font-medium text-foreground text-sm leading-tight">{a.nomeEstudo}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{a.nomeUsina}</p>
         </div>
       </td>
       <td>
-        <Badge variant={u.fonte as 'solar' | 'cgh' | 'pch' | 'eolica'}>
-          <FonteIcon fonte={u.fonte} className="w-3 h-3" />
-          {FONTE_LABELS[u.fonte]}
+        <Badge variant={fonteKey}>
+          <FonteIcon fonte={fonteKey} className="w-3 h-3" />
+          {FONTE_LABELS[fonteKey] ?? a.fonte}
         </Badge>
       </td>
       <td className="text-sm tabular-nums">
-        {fmtPotencia(u.potencia, u.fonte === 'solar')}
+        {fmtPotencia(a.potencia, a.fonte === 'ufv' || a.fonte === 'solar')}
       </td>
-      <td className="text-sm tabular-nums text-muted-foreground">
-        {fmtBRL(u.custoUsina)}
-      </td>
-      <td className="text-sm tabular-nums text-muted-foreground">
-        {fmtBRL(u.custoObraRede)}
+      <td className="text-sm text-muted-foreground">
+        {aquisicaoLabel[a.tipoAquisicao] ?? a.tipoAquisicao}
       </td>
       <td>
         <span className="text-sm font-semibold text-foreground tabular-nums">
-          {fmtBRL(u.investimentoTotal)}
+          {fmtBRL(study.capex.total)}
         </span>
+      </td>
+      <td className="text-sm tabular-nums text-muted-foreground">
+        {study.tarifas.tarifaVenda > 0 ? `R$ ${study.tarifas.tarifaVenda.toFixed(2)}/MWh` : '—'}
       </td>
       <td className="text-xs text-muted-foreground">
         {format(new Date(study.criadoEm), "dd MMM yyyy", { locale: ptBR })}
@@ -336,7 +345,6 @@ function StudyRow({ study, duplicating, onEdit, onDuplicate, onDelete }: {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon-sm">
               <MoreHorizontal className="w-4 h-4" />
-              <span className="sr-only">Acoes</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">

@@ -1,39 +1,18 @@
 /**
- * studyService.ts
- * CRUD completo de estudos no Firestore
- *
- * Coleção principal: "studies"
- * Sem autenticação — acesso público conforme regras Firestore
+ * studyService.ts — CRUD Firestore (Fase 1.1)
+ * Migra automaticamente estudos da Fase 1 para o novo schema.
  */
 
 import {
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  orderBy,
-  Timestamp,
-  serverTimestamp,
+  collection, doc, getDocs, getDoc,
+  addDoc, updateDoc, deleteDoc,
+  query, orderBy, Timestamp, serverTimestamp,
 } from 'firebase/firestore'
 import { db } from './firebase'
+import { migrateStudy } from '@/types/study'
 import type { Study } from '@/types/study'
 
 const COL = 'studies'
-
-// ─── Conversão Firestore ↔ Study ──────────────────────────────
-
-function docToStudy(id: string, data: Record<string, unknown>): Study {
-  return {
-    ...(data as Omit<Study, 'id' | 'criadoEm' | 'atualizadoEm'>),
-    id,
-    criadoEm:     toISO(data.criadoEm),
-    atualizadoEm: toISO(data.atualizadoEm),
-  }
-}
 
 function toISO(val: unknown): string {
   if (val instanceof Timestamp) return val.toDate().toISOString()
@@ -41,7 +20,10 @@ function toISO(val: unknown): string {
   return new Date().toISOString()
 }
 
-// ─── Listar ──────────────────────────────────────────────────
+function docToStudy(id: string, data: Record<string, unknown>): Study {
+  const raw = { ...data, id, criadoEm: toISO(data.criadoEm), atualizadoEm: toISO(data.atualizadoEm) }
+  return migrateStudy(raw)
+}
 
 export async function listStudies(): Promise<Study[]> {
   const q    = query(collection(db, COL), orderBy('criadoEm', 'desc'))
@@ -49,15 +31,11 @@ export async function listStudies(): Promise<Study[]> {
   return snap.docs.map((d) => docToStudy(d.id, d.data() as Record<string, unknown>))
 }
 
-// ─── Buscar por ID ───────────────────────────────────────────
-
 export async function getStudy(id: string): Promise<Study | null> {
   const snap = await getDoc(doc(db, COL, id))
   if (!snap.exists()) return null
   return docToStudy(snap.id, snap.data() as Record<string, unknown>)
 }
-
-// ─── Criar ───────────────────────────────────────────────────
 
 export async function createStudy(
   study: Omit<Study, 'id' | 'criadoEm' | 'atualizadoEm'>
@@ -70,8 +48,6 @@ export async function createStudy(
   return ref.id
 }
 
-// ─── Atualizar ───────────────────────────────────────────────
-
 export async function updateStudy(
   id: string,
   data: Partial<Omit<Study, 'id' | 'criadoEm'>>
@@ -82,23 +58,19 @@ export async function updateStudy(
   })
 }
 
-// ─── Excluir ─────────────────────────────────────────────────
-
 export async function deleteStudy(id: string): Promise<void> {
   await deleteDoc(doc(db, COL, id))
 }
 
-// ─── Duplicar ────────────────────────────────────────────────
-
 export async function duplicateStudy(id: string): Promise<string> {
   const original = await getStudy(id)
-  if (!original) throw new Error('Estudo não encontrado')
+  if (!original) throw new Error('Estudo nao encontrado')
   const { id: _id, criadoEm: _c, atualizadoEm: _a, ...rest } = original
   return createStudy({
     ...rest,
-    dadosUsina: {
-      ...rest.dadosUsina,
-      nomeEstudo: `${rest.dadosUsina.nomeEstudo} (Cópia)`,
+    ativo: {
+      ...rest.ativo,
+      nomeEstudo: `${rest.ativo.nomeEstudo} (Copia)`,
     },
   })
 }
