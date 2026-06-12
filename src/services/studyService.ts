@@ -1,6 +1,6 @@
 /**
- * studyService.ts — CRUD Firestore (Fase 1.1)
- * Migra automaticamente estudos da Fase 1 para o novo schema.
+ * studyService.ts — CRUD Firestore (Fase 2)
+ * Inclui persistência dos resultados financeiros.
  */
 
 import {
@@ -11,6 +11,7 @@ import {
 import { db } from './firebase'
 import { migrateStudy } from '@/types/study'
 import type { Study } from '@/types/study'
+import type { ResultadosFinanceiros } from '@/types/results'
 
 const COL = 'studies'
 
@@ -72,5 +73,33 @@ export async function duplicateStudy(id: string): Promise<string> {
       ...rest.ativo,
       nomeEstudo: `${rest.ativo.nomeEstudo} (Copia)`,
     },
+  })
+}
+
+/**
+ * Salva os indicadores-resumo dos resultados financeiros no documento do estudo.
+ * A tabela completa (AnoRow[]) NÃO é salva — é recalculada on-demand no cliente.
+ * Armazena apenas os indicadores escalares para evitar documentos grandes.
+ */
+export async function saveResultados(
+  studyId: string,
+  res: ResultadosFinanceiros,
+): Promise<void> {
+  const indicadores = {
+    resultados: {
+      geracaoMediaMensal:  res.geracaoMediaMensal,
+      receitaAnual:        res.receitaAnual,
+      ebitdaAnual:         res.ebitdaAnual,
+      capex:               res.capex,
+      vpl:                 res.vpl,
+      tir:                 res.tir,
+      paybackSimples:      res.paybackSimples,
+      paybackDescontado:   res.paybackDescontado,
+      calculadoEm:         res.calculadoEm,
+    },
+  }
+  await updateDoc(doc(db, COL, studyId), {
+    ...indicadores,
+    atualizadoEm: serverTimestamp(),
   })
 }

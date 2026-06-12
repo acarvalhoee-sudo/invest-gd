@@ -1,11 +1,9 @@
 /**
- * StudyFormPage.tsx - Fase 1.4
+ * StudyFormPage.tsx - Fase 2
  * Wizard: Ativo / Premissas / Resultados
  *
- * Mudancas v1.4:
- * - MoneyInput com mascara brasileira (1.000,00 / 12,65%)
- * - tributosReceita adicionado como campo independente
- * - aliquotaTotal REMOVIDO — tributos sem calculo automatico
+ * v2: aba Resultados implementada com motor financeiro completo.
+ *     Salva resultados (indicadores) no Firestore ao salvar o estudo.
  */
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -16,7 +14,8 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-import { getStudy, createStudy, updateStudy } from '@/services/studyService'
+import { getStudy, createStudy, updateStudy, saveResultados } from '@/services/studyService'
+import { calcResultados } from '@/utils/financialEngine'
 import {
   STUDY_DEFAULTS, CONCESSIONARIAS,
   calcCapexTotal, calcGeracaoMensal,
@@ -26,16 +25,17 @@ import type {
   Ativo, Tarifas, Tributos, Capex, Opex, PremissasFinanceiras,
 } from '@/types/study'
 
-import { Button }    from '@/components/ui/button'
-import { Input }     from '@/components/ui/input'
+import { Button }     from '@/components/ui/button'
+import { Input }      from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/money-input'
-import { Label }     from '@/components/ui/label'
+import { Label }      from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import {
   Select, SelectContent, SelectItem,
   SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import ResultadosTab from '@/components/ResultadosTab'
 
 // ─── Helpers UI ───────────────────────────────────────────────
 
@@ -80,7 +80,7 @@ function fmtNum(n: number, decimals = 1) {
   })
 }
 
-/** Campo numerico simples (sem mascara BRL) — para inteiros pequenos como anos e meses */
+/** Campo numérico simples (sem máscara BRL) — para inteiros pequenos */
 function NumInput({
   value, onChange, suffix, step = 1, min = 0, max, error, placeholder,
 }: {
@@ -147,7 +147,7 @@ function WizardHeader({ current, onChange }: {
   )
 }
 
-// ─── Estado do formulario ─────────────────────────────────────
+// ─── Estado do formulário ─────────────────────────────────────
 
 type FormData = {
   ativo:                Ativo
@@ -199,6 +199,7 @@ export default function StudyFormPage() {
   const [saving,  setSaving]  = useState(false)
   const [loading, setLoading] = useState(!isNew)
   const [errors,  setErrors]  = useState<Record<string, string>>({})
+  const [savedId, setSavedId] = useState<string | undefined>(isNew ? undefined : id)
 
   const { state, setAtivo, setCapex, set, reset } = useForm({
     ativo:                STUDY_DEFAULTS.ativo,
@@ -222,6 +223,7 @@ export default function StudyFormPage() {
               opex:                 s.opex,
               premissasFinanceiras: s.premissasFinanceiras,
             })
+            setSavedId(s.id)
           } else {
             toast.error('Estudo nao encontrado.')
             navigate('/')
@@ -255,13 +257,31 @@ export default function StudyFormPage() {
         opex:                 state.opex,
         premissasFinanceiras: state.premissasFinanceiras,
       }
-      if (isNew) {
-        await createStudy(payload)
+
+      let docId = savedId
+      if (isNew || !docId) {
+        docId = await createStudy(payload)
+        setSavedId(docId)
         toast.success('Estudo criado!')
       } else {
-        await updateStudy(id!, payload)
+        await updateStudy(docId, payload)
         toast.success('Estudo atualizado!')
       }
+
+      // Salva indicadores dos resultados no Firestore
+      try {
+        const studyFull: Study = {
+          ...payload,
+          id: docId,
+          criadoEm:    new Date().toISOString(),
+          atualizadoEm:new Date().toISOString(),
+        }
+        const res = calcResultados(studyFull)
+        await saveResultados(docId, res)
+      } catch {
+        // Falha silenciosa — não bloqueia o save principal
+      }
+
       navigate('/')
     } catch { toast.error('Erro ao salvar.') }
     finally { setSaving(false) }
@@ -285,7 +305,18 @@ export default function StudyFormPage() {
   const a  = state.ativo
   const c  = state.capex
   const t  = state.tributos
-  const pf = state.premissasFinanceiras
+
+  // Monta study completo para passar ao ResultadosTab
+  const studyParaResultados: Study = {
+    ativo:                state.ativo,
+    tarifas:              state.tarifas,
+    tributos:             state.tributos,
+    capex:                state.capex,
+    opex:                 state.opex,
+    premissasFinanceiras: state.premissasFinanceiras,
+    criadoEm:             new Date().toISOString(),
+    atualizadoEm:         new Date().toISOString(),
+  }
 
   // ═══════════════════════════════════════════════════════
   return (
@@ -303,10 +334,12 @@ export default function StudyFormPage() {
               <p className="page-subtitle">{a.nomeEstudo || 'Preencha os dados do estudo'}</p>
             </div>
           </div>
-          <Button onClick={handleSave} disabled={saving}>
-            <Save className="w-4 h-4" />
-            {saving ? 'Salvando...' : 'Salvar'}
-          </Button>
+          {step < 2 && (
+            <Button onClick={handleSave} disabled={saving}>
+              <Save className="w-4 h-4" />
+              {saving ? 'Salvando...' : 'Salvar'}
+            </Button>
+          )}
         </div>
 
         <WizardHeader current={step} onChange={setStep} />
@@ -322,8 +355,7 @@ export default function StudyFormPage() {
               <CardHeader>
                 <CardTitle className="text-sm">Identificacao</CardTitle>
                 <CardDescription>
-                  "Nome do Estudo" permite multiplas analises para a mesma usina —
-                  ex.: "CGH Sao Joao - Base", "CGH Sao Joao - Financiado"
+                  "Nome do Estudo" permite multiplas analises para a mesma usina.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -354,8 +386,6 @@ export default function StudyFormPage() {
                 <CardTitle className="text-sm">Caracteristicas Tecnicas</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-
-                {/* Linha 1: Fonte / Potencia / TipoGD */}
                 <div className="form-grid-3">
                   <Field label="Tipo de Fonte" required>
                     <Select
@@ -376,24 +406,18 @@ export default function StudyFormPage() {
                   </Field>
 
                   <Field
-                    label={`Potencia Instalada (${a.fonte === 'ufv' || a.fonte === 'solar' ? 'kWp' : 'kW'})`}
-                    required
-                    hint={a.fonte === 'ufv' || a.fonte === 'solar'
-                      ? 'Potencia de pico para usinas fotovoltaicas'
-                      : 'Potencia instalada'}
-                    error={errors.potencia}
+                    label={`Potencia (${a.fonte === 'ufv' || a.fonte === 'solar' ? 'kWp' : 'kW'})`}
+                    required error={errors.potencia}
                   >
                     <MoneyInput
                       value={a.potencia}
                       onChange={(v) => setAtivo({ potencia: v })}
-                      mode="money"
-                      prefix=""
-                      suffix={a.fonte === 'ufv' || a.fonte === 'solar' ? ' kWp' : ' kW'}
+                      mode="money" prefix="" suffix={a.fonte === 'ufv' || a.fonte === 'solar' ? ' kWp' : ' kW'}
                       error={errors.potencia}
                     />
                   </Field>
 
-                  <Field label="Tipo de GD" hint="Classificacao regulatoria da geracao distribuida">
+                  <Field label="Tipo de GD">
                     <Select
                       value={a.tipoGD}
                       onValueChange={(v) => setAtivo({ tipoGD: v as TipoGD })}
@@ -408,19 +432,13 @@ export default function StudyFormPage() {
                   </Field>
                 </div>
 
-                {/* Linha 2: Concessionaria / FC / Demanda */}
                 <div className="form-grid-3">
-                  <Field
-                    label="Concessionaria"
-                    hint="Distribuidora de energia eletrica da area de concessao do projeto"
-                  >
+                  <Field label="Concessionaria">
                     <Select
                       value={a.concessionaria || ''}
                       onValueChange={(v) => setAtivo({ concessionaria: v })}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecionar..." />
-                      </SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder="Selecionar..." /></SelectTrigger>
                       <SelectContent>
                         {CONCESSIONARIAS.map((con) => (
                           <SelectItem key={con} value={con}>{con}</SelectItem>
@@ -429,10 +447,7 @@ export default function StudyFormPage() {
                     </Select>
                   </Field>
 
-                  <Field
-                    label="Fator de Capacidade (%)"
-                    hint="Relacao entre producao real e maxima teorica. CGH ~35%, UFV ~22%"
-                  >
+                  <Field label="Fator de Capacidade (%)" hint="CGH ~35%, UFV ~22%">
                     <MoneyInput
                       value={a.fatorCapacidade}
                       onChange={(v) => setAtivo({ fatorCapacidade: Math.min(100, v) })}
@@ -440,35 +455,30 @@ export default function StudyFormPage() {
                     />
                   </Field>
 
-                  <Field label="Demanda Contratada" hint="Demanda contratada junto a distribuidora">
+                  <Field label="Demanda Contratada" hint="Demanda junto a distribuidora">
                     <MoneyInput
                       value={a.demanda}
                       onChange={(v) => setAtivo({ demanda: v })}
-                      mode="money"
-                      prefix=""
-                      suffix=" kW"
+                      mode="money" prefix="" suffix=" kW"
                     />
                   </Field>
                 </div>
 
-                {/* Linha 3: Consumo UG / Geracao Mensal (read-only) */}
                 <div className="form-grid-2">
-                  <Field label="Consumo Anual da UG" hint="Consumo anual da unidade gestora beneficiada">
+                  <Field label="Consumo Anual da UG">
                     <MoneyInput
                       value={a.consumoAnualUG}
                       onChange={(v) => setAtivo({ consumoAnualUG: v })}
-                      mode="money"
-                      prefix=""
-                      suffix=" MWh"
+                      mode="money" prefix="" suffix=" MWh"
                     />
                   </Field>
 
-                  {/* Geracao Media Mensal — calculado automaticamente */}
+                  {/* Geracao Media Mensal — read-only */}
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium flex items-center gap-1 text-muted-foreground">
                       <Zap className="w-3.5 h-3.5" />
                       Geracao Media Mensal
-                      <Hint text="Calculado: Potencia x Fator de Capacidade x 730h / 1000. Refinado na Fase 2." />
+                      <Hint text="Potencia x FC x 730h / 1000" />
                     </label>
                     <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-border bg-muted/50 text-sm cursor-not-allowed">
                       <span className="font-semibold text-primary">
@@ -496,28 +506,21 @@ export default function StudyFormPage() {
               </CardHeader>
               <CardContent>
                 <div className="form-grid-3">
-                  <Field label="TUSD G (R$/kW)" hint="Tarifa de Uso do Sistema de Distribuicao — componente geracao">
+                  <Field label="TUSD G (R$/kW)" hint="Tarifa de Uso do Sistema de Distribuicao">
                     <MoneyInput
                       value={state.tarifas.tusdG}
                       onChange={(v) => set('tarifas', { tusdG: v })}
-                      mode="money"
-                      prefix=""
-                      suffix=" R$/kW"
+                      mode="money" prefix="" suffix=" R$/kW"
                     />
                   </Field>
-                  <Field label="Tarifa de Venda (R$/MWh)" hint="Preco de venda da energia injetada">
+                  <Field label="Tarifa de Venda (R$/MWh)" hint="Preco de venda da energia">
                     <MoneyInput
                       value={state.tarifas.tarifaVenda}
                       onChange={(v) => set('tarifas', { tarifaVenda: v })}
-                      mode="money"
-                      prefix="R$ "
-                      suffix="/MWh"
+                      mode="money" prefix="R$ " suffix="/MWh"
                     />
                   </Field>
-                  <Field
-                    label="Reajuste Anual (%)"
-                    hint="Percentual de reajuste anual da tarifa — utilizado no fluxo de caixa (Fase 2)"
-                  >
+                  <Field label="Reajuste Anual (%)" hint="Reajuste anual da tarifa (fluxo de caixa)">
                     <MoneyInput
                       value={state.tarifas.reajusteAnual}
                       onChange={(v) => set('tarifas', { reajusteAnual: v })}
@@ -533,17 +536,14 @@ export default function StudyFormPage() {
               <CardHeader>
                 <CardTitle className="text-sm">Tributacao</CardTitle>
                 <CardDescription>
-                  Campos independentes — nenhum campo e calculado com base nos outros.
-                  "Tributos sobre Receita" e a aliquota efetiva utilizada nos calculos financeiros.
+                  Campos independentes. "Tributos sobre Receita" e a aliquota utilizada nos calculos financeiros.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-
-                {/* Tributos sobre Receita — campo primario */}
                 <div className="rounded-lg bg-primary/5 border border-primary/20 p-4">
                   <Field
                     label="Tributos sobre Receita (%)"
-                    hint="Aliquota efetiva total utilizada para calcular a receita liquida, VPL, TIR e Payback. Independente dos campos PIS/COFINS/ICMS abaixo."
+                    hint="Aliquota efetiva para calcular receita liquida, VPL, TIR e Payback."
                   >
                     <MoneyInput
                       value={t.tributosReceita}
@@ -553,36 +553,22 @@ export default function StudyFormPage() {
                     />
                   </Field>
                   <p className="text-xs text-primary/70 mt-2">
-                    Utilizado nos calculos financeiros (Receita Liquida, Fluxo de Caixa, VPL, TIR, Payback)
+                    Utilizado nos calculos financeiros
                   </p>
                 </div>
-
-                {/* PIS / COFINS / ICMS */}
                 <div>
                   <p className="text-xs text-muted-foreground mb-3">
-                    Campos abaixo destinados a simulacoes tarifarias e memorial de calculo — nao alteram os resultados financeiros.
+                    PIS/COFINS/ICMS: simulacoes tarifarias — nao afetam os resultados financeiros.
                   </p>
                   <div className="form-grid-3">
-                    <Field label="PIS (%)" hint="Programa de Integracao Social — aliquota sobre receita (uso tarifario)">
-                      <MoneyInput
-                        value={t.pis}
-                        onChange={(v) => set('tributos', { pis: v })}
-                        mode="percent"
-                      />
+                    <Field label="PIS (%)">
+                      <MoneyInput value={t.pis} onChange={(v) => set('tributos', { pis: v })} mode="percent" />
                     </Field>
-                    <Field label="COFINS (%)" hint="Contribuicao para Financiamento da Seguridade Social (uso tarifario)">
-                      <MoneyInput
-                        value={t.cofins}
-                        onChange={(v) => set('tributos', { cofins: v })}
-                        mode="percent"
-                      />
+                    <Field label="COFINS (%)">
+                      <MoneyInput value={t.cofins} onChange={(v) => set('tributos', { cofins: v })} mode="percent" />
                     </Field>
-                    <Field label="ICMS (%)" hint="Imposto sobre Circulacao de Mercadorias e Servicos — aliquota estadual (uso tarifario)">
-                      <MoneyInput
-                        value={t.icms}
-                        onChange={(v) => set('tributos', { icms: v })}
-                        mode="percent"
-                      />
+                    <Field label="ICMS (%)">
+                      <MoneyInput value={t.icms} onChange={(v) => set('tributos', { icms: v })} mode="percent" />
                     </Field>
                   </div>
                 </div>
@@ -593,7 +579,7 @@ export default function StudyFormPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">CAPEX</CardTitle>
-                <CardDescription>Capital expenditure — investimento inicial no projeto</CardDescription>
+                <CardDescription>Investimento inicial no projeto</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="form-grid-2">
@@ -605,7 +591,7 @@ export default function StudyFormPage() {
                       error={errors.capexUsina}
                     />
                   </Field>
-                  <Field label="Custo da Obra de Rede" hint="Adequacao de rede, conexao e acesso ao sistema de distribuicao">
+                  <Field label="Custo da Obra de Rede">
                     <MoneyInput
                       value={c.obraRede}
                       onChange={(v) => setCapex({ obraRede: v })}
@@ -613,8 +599,6 @@ export default function StudyFormPage() {
                     />
                   </Field>
                 </div>
-
-                {/* CAPEX Total em destaque */}
                 <div className="rounded-xl bg-primary/5 border border-primary/20 p-5">
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                     <div className="col-span-2">
@@ -653,54 +637,30 @@ export default function StudyFormPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">OPEX — Custos Operacionais</CardTitle>
-                <CardDescription>Despesas anuais recorrentes ao longo da vida do projeto</CardDescription>
+                <CardDescription>
+                  Operacao, Manutencao e Seguro: % do CAPEX Total (anuais, proporcionais no Ano 1).
+                  Gestao: % da Receita Bruta. Arrendamento e Fixo Gestao: R$/mes.
+                </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent>
                 <div className="form-grid-3">
-                  <Field label="Operacao (%)" hint="Custos de operacao anual — percentual do CAPEX">
-                    <MoneyInput
-                      value={state.opex.operacao}
-                      onChange={(v) => set('opex', { operacao: v })}
-                      mode="percent"
-                    />
+                  <Field label="Operacao (%)" hint="% do CAPEX Total (anual)">
+                    <MoneyInput value={state.opex.operacao} onChange={(v) => set('opex', { operacao: v })} mode="percent" />
                   </Field>
-                  <Field label="Manutencao (%)" hint="Manutencao preventiva e corretiva — percentual do CAPEX">
-                    <MoneyInput
-                      value={state.opex.manutencao}
-                      onChange={(v) => set('opex', { manutencao: v })}
-                      mode="percent"
-                    />
+                  <Field label="Manutencao (%)" hint="% do CAPEX Total (anual)">
+                    <MoneyInput value={state.opex.manutencao} onChange={(v) => set('opex', { manutencao: v })} mode="percent" />
                   </Field>
-                  <Field label="Seguro (%)" hint="Seguro patrimonial anual — percentual do CAPEX">
-                    <MoneyInput
-                      value={state.opex.seguro}
-                      onChange={(v) => set('opex', { seguro: v })}
-                      mode="percent"
-                    />
+                  <Field label="Seguro (%)" hint="% do CAPEX Total (anual)">
+                    <MoneyInput value={state.opex.seguro} onChange={(v) => set('opex', { seguro: v })} mode="percent" />
                   </Field>
-                  <Field label="Gestao (%)" hint="Taxa de gestao — percentual sobre receita bruta">
-                    <MoneyInput
-                      value={state.opex.gestao}
-                      onChange={(v) => set('opex', { gestao: v })}
-                      mode="percent"
-                    />
+                  <Field label="Gestao (%)" hint="% da Receita Bruta">
+                    <MoneyInput value={state.opex.gestao} onChange={(v) => set('opex', { gestao: v })} mode="percent" />
                   </Field>
-                  <Field label="Arrendamento (R$/mes)" hint="Custo mensal de arrendamento de area ou terreno">
-                    <MoneyInput
-                      value={state.opex.arrendamento}
-                      onChange={(v) => set('opex', { arrendamento: v })}
-                      mode="money"
-                    />
+                  <Field label="Arrendamento (R$/mes)">
+                    <MoneyInput value={state.opex.arrendamento} onChange={(v) => set('opex', { arrendamento: v })} mode="money" />
                   </Field>
-                  <Field
-                    label="Fixo de Gestao (R$/mes)"
-                    hint="Custos fixos mensais administrativos e de gestao da usina — independente da receita"
-                  >
-                    <MoneyInput
-                      value={state.opex.fixoGestao}
-                      onChange={(v) => set('opex', { fixoGestao: v })}
-                      mode="money"
-                    />
+                  <Field label="Fixo de Gestao (R$/mes)" hint="Custo fixo mensal independente da receita">
+                    <MoneyInput value={state.opex.fixoGestao} onChange={(v) => set('opex', { fixoGestao: v })} mode="money" />
                   </Field>
                 </div>
               </CardContent>
@@ -710,46 +670,44 @@ export default function StudyFormPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">Premissas Financeiras</CardTitle>
-                <CardDescription>
-                  Parametros macroeconomicos para o modelo de viabilidade (Fase 2)
-                </CardDescription>
+                <CardDescription>Parametros macroeconomicos do modelo de viabilidade</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="form-grid-3">
-                  <Field label="Vida Util do Projeto" hint="Horizonte de analise do projeto em anos">
+                  <Field label="Vida Util (anos)">
                     <NumInput
-                      value={pf.vidaUtil}
+                      value={state.premissasFinanceiras.vidaUtil}
                       onChange={(v) => set('premissasFinanceiras', { vidaUtil: v })}
                       suffix=" anos" step={1} min={1} max={50}
                     />
                   </Field>
-                  <Field label="Taxa de Desconto / TMA" hint="Taxa Minima de Atratividade — hurdle rate do investidor">
+                  <Field label="TMA (%)" hint="Taxa Minima de Atratividade">
                     <MoneyInput
-                      value={pf.tma}
+                      value={state.premissasFinanceiras.tma}
                       onChange={(v) => set('premissasFinanceiras', { tma: v })}
                       mode="percent"
                     />
                   </Field>
-                  <Field label="SELIC" hint="Taxa basica de juros — benchmark de comparacao">
+                  <Field label="SELIC (%)">
                     <MoneyInput
-                      value={pf.selic}
+                      value={state.premissasFinanceiras.selic}
                       onChange={(v) => set('premissasFinanceiras', { selic: v })}
                       mode="percent"
                     />
                   </Field>
-                  <Field label="Inflacao (IPCA)" hint="Projecao de inflacao anual para correcao de valores">
+                  <Field label="Inflacao / IPCA (%)">
                     <MoneyInput
-                      value={pf.inflacao}
+                      value={state.premissasFinanceiras.inflacao}
                       onChange={(v) => set('premissasFinanceiras', { inflacao: v })}
                       mode="percent"
                     />
                   </Field>
                   <Field
                     label="Meses no Primeiro Ano"
-                    hint="Quantos meses de operacao no primeiro ano. Ex.: inicio em setembro = 4 meses."
+                    hint="Meses de operacao no Ano 1. Ex.: inicio em setembro = 4 meses."
                   >
                     <NumInput
-                      value={pf.mesesPrimeiroAno}
+                      value={state.premissasFinanceiras.mesesPrimeiroAno}
                       onChange={(v) =>
                         set('premissasFinanceiras', {
                           mesesPrimeiroAno: Math.round(Math.max(1, Math.min(12, v))),
@@ -767,78 +725,23 @@ export default function StudyFormPage() {
                 <ChevronLeft className="w-4 h-4" /> Anterior
               </Button>
               <Button onClick={() => setStep(2)}>
-                Proxima: Resultados <ChevronRight className="w-4 h-4" />
+                Ver Resultados <ChevronRight className="w-4 h-4" />
               </Button>
             </div>
           </div>
         )}
 
         {/* ════════════════════════════════════ */}
-        {/* ABA 2 — RESULTADOS (placeholder)    */}
+        {/* ABA 2 — RESULTADOS (motor Fase 2)    */}
         {/* ════════════════════════════════════ */}
         {step === 2 && (
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Resultados Financeiros</CardTitle>
-                <CardDescription>
-                  Indicadores de viabilidade economico-financeira do projeto
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-xl border border-primary/20 bg-primary/5 p-6 text-center mb-6">
-                  <BarChart2 className="w-10 h-10 text-primary mx-auto mb-3 opacity-70" />
-                  <p className="text-sm font-semibold text-foreground">
-                    Calculos financeiros serao implementados na Fase 2.
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Salve o estudo para preservar as premissas cadastradas.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {[
-                    {
-                      label: 'Geracao Anual', unit: 'MWh/ano',
-                      value: a.geracaoMediaMensal > 0
-                        ? fmtNum(a.geracaoMediaMensal * 12) : null,
-                    },
-                    { label: 'Receita Anual',      unit: 'R$/ano' },
-                    { label: 'OPEX Anual',         unit: 'R$/ano' },
-                    { label: 'EBITDA',             unit: 'R$/ano' },
-                    { label: 'VPL',                unit: 'R$'     },
-                    { label: 'TIR',                unit: '% a.a.' },
-                    { label: 'Payback Simples',    unit: 'anos'   },
-                    { label: 'Payback Descontado', unit: 'anos'   },
-                    {
-                      label: 'CAPEX Total', unit: 'R$',
-                      value: fmtCurrency(c.total),
-                    },
-                  ].map((item) => (
-                    <div key={item.label} className="bg-muted/50 border border-border rounded-lg p-3">
-                      <p className="text-xs text-muted-foreground">{item.label}</p>
-                      <p className="text-sm font-bold text-foreground mt-1">
-                        {item.value
-                          ? item.value
-                          : <span className="text-muted-foreground/50 font-normal italic text-xs">—</span>}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground/60">{item.unit}</p>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep(1)}>
-                <ChevronLeft className="w-4 h-4" /> Anterior
-              </Button>
-              <Button onClick={handleSave} disabled={saving} size="lg">
-                <Save className="w-4 h-4" />
-                {saving ? 'Salvando...' : isNew ? 'Criar Estudo' : 'Salvar Alteracoes'}
-              </Button>
-            </div>
-          </div>
+          <ResultadosTab
+            study={studyParaResultados}
+            saving={saving}
+            onSave={handleSave}
+            onBack={() => setStep(1)}
+            isNew={isNew}
+          />
         )}
 
       </div>
