@@ -1,0 +1,2 @@
+Salve o arquivo "solfus-logo.png" nesta pasta (public/).
+O componente RelatorioExecutivoTab.tsx irá carregá-lo automaticamente.

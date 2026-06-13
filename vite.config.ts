@@ -7,4 +7,13 @@ export default defineConfig({
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },
   },
+  build: {
+    emptyOutDir: false,
+    rollupOptions: {
+      external: ['html2canvas', 'canvg', 'dompurify', 'fast-png'],
+    },
+  },
+  optimizeDeps: {
+    exclude: ['html2canvas', 'canvg', 'dompurify', 'fast-png'],
+  },
 })
