@@ -1,8 +1,6 @@
 /**
- * studyService.ts — CRUD Firestore (Fase 2)
- * Inclui persistência dos resultados financeiros.
+ * studyService.ts — CRUD Firestore + Fase 03 (status, favorito, histórico)
  */
-
 import {
   collection, doc, getDocs, getDoc,
   addDoc, updateDoc, deleteDoc,
@@ -10,10 +8,11 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import { migrateStudy } from '@/types/study'
-import type { Study } from '@/types/study'
+import type { Study, StudyStatus } from '@/types/study'
 import type { ResultadosFinanceiros } from '@/types/results'
 
-const COL = 'studies'
+const COL      = 'studies'
+const HIST_COL = 'studyHistory'
 
 function toISO(val: unknown): string {
   if (val instanceof Timestamp) return val.toDate().toISOString()
@@ -69,17 +68,69 @@ export async function duplicateStudy(id: string): Promise<string> {
   const { id: _id, criadoEm: _c, atualizadoEm: _a, ...rest } = original
   return createStudy({
     ...rest,
+    status:   'Em Elaboração',
+    favorito: false,
     ativo: {
       ...rest.ativo,
-      nomeEstudo: `${rest.ativo.nomeEstudo} (Copia)`,
+      nomeEstudo: `${rest.ativo.nomeEstudo} - Cópia`,
     },
   })
 }
 
+export async function updateStatus(id: string, status: StudyStatus): Promise<void> {
+  await updateDoc(doc(db, COL, id), { status, atualizadoEm: serverTimestamp() })
+}
+
+export async function toggleFavorito(id: string, favorito: boolean): Promise<void> {
+  await updateDoc(doc(db, COL, id), { favorito, atualizadoEm: serverTimestamp() })
+}
+
+export async function updateTags(id: string, tags: string[]): Promise<void> {
+  await updateDoc(doc(db, COL, id), { tags, atualizadoEm: serverTimestamp() })
+}
+
+/* ── Histórico ── */
+export interface HistoryEntry {
+  id?:           string
+  studyId:       string
+  data:          string
+  usuario:       string
+  campo:         string
+  valorAnterior: string
+  novoValor:     string
+}
+
+export async function addHistory(entry: Omit<HistoryEntry, 'id' | 'data'>): Promise<void> {
+  await addDoc(collection(db, HIST_COL), {
+    ...entry,
+    data: serverTimestamp(),
+  })
+}
+
+export async function getHistory(studyId: string): Promise<HistoryEntry[]> {
+  const q    = query(
+    collection(db, HIST_COL),
+    orderBy('data', 'desc'),
+  )
+  const snap = await getDocs(q)
+  return snap.docs
+    .map((d) => {
+      const data = d.data() as Record<string, unknown>
+      return {
+        id:            d.id,
+        studyId:       String(data.studyId ?? ''),
+        data:          toISO(data.data),
+        usuario:       String(data.usuario ?? 'Sistema'),
+        campo:         String(data.campo ?? ''),
+        valorAnterior: String(data.valorAnterior ?? ''),
+        novoValor:     String(data.novoValor ?? ''),
+      } as HistoryEntry
+    })
+    .filter((h) => h.studyId === studyId)
+}
+
 /**
- * Salva os indicadores-resumo dos resultados financeiros no documento do estudo.
- * A tabela completa (AnoRow[]) NÃO é salva — é recalculada on-demand no cliente.
- * Armazena apenas os indicadores escalares para evitar documentos grandes.
+ * Salva os indicadores-resumo dos resultados financeiros.
  */
 export async function saveResultados(
   studyId: string,

@@ -10,6 +10,40 @@ export type FonteGeracao =
   | 'biomassa' | 'biogas' | 'outros' | 'solar'
 
 export type TipoGD = 'GD I' | 'GD II' | 'GD III'
+export type StudyStatus =
+  | 'Em Elaboração'
+  | 'Em Análise'
+  | 'Apresentado ao Investidor'
+  | 'Em Negociação'
+  | 'Aprovado'
+  | 'Reprovado'
+  | 'Arquivado'
+
+export const STUDY_STATUSES: StudyStatus[] = [
+  'Em Elaboração',
+  'Em Análise',
+  'Apresentado ao Investidor',
+  'Em Negociação',
+  'Aprovado',
+  'Reprovado',
+  'Arquivado',
+]
+
+export const STATUS_COLORS: Record<StudyStatus, string> = {
+  'Em Elaboração':             '#ea580c',
+  'Em Análise':                '#0B5E3B',
+  'Apresentado ao Investidor': '#7c3aed',
+  'Em Negociação':             '#d97706',
+  'Aprovado':                  '#15803d',
+  'Reprovado':                 '#dc2626',
+  'Arquivado':                 '#64748b',
+}
+export const ESTADOS_BR = [
+  'AC','AL','AP','AM','BA','CE','DF','ES','GO',
+  'MA','MT','MS','MG','PA','PB','PR','PE','PI',
+  'RJ','RN','RS','RO','RR','SC','SP','SE','TO',
+] as const
+export type EstadoBR = typeof ESTADOS_BR[number]
 
 export const FONTE_LABELS: Record<FonteGeracao, string> = {
   ufv:      'UFV',
@@ -57,6 +91,7 @@ export interface Ativo {
   demanda:           number
   consumoAnualUG:    number
   geracaoMediaMensal:number
+  estado:             string
 }
 
 export interface Tarifas {
@@ -113,6 +148,10 @@ export interface Study {
   capex:                Capex
   opex:                 Opex
   premissasFinanceiras: PremissasFinanceiras
+  status:               StudyStatus
+  favorito:             boolean
+  tags:                 string[]
+  resultados?:          Record<string,number|string|null>
   criadoEm:             string
   atualizadoEm:         string
   // Legado
@@ -135,10 +174,14 @@ export function calcCapexTotal(c: Pick<Capex, 'usina' | 'obraRede'>): number {
 // --- Defaults ---
 
 export const STUDY_DEFAULTS: Omit<Study, 'id' | 'criadoEm' | 'atualizadoEm'> = {
+  status:   'Em Elaboração',
+  favorito: false,
+  tags:     [],
   ativo: {
     nomeEstudo:        '',
     nomeUsina:         '',
     concessionaria:    '',
+    estado:            '',
     fonte:             'cgh',
     potencia:          0,
     tipoGD:            'GD II',
@@ -241,6 +284,9 @@ export function migrateStudy(raw: Record<string, unknown>): Study {
 
     return {
       ...(raw as object),
+      status:   (raw.status as StudyStatus) ?? 'Em Elaboração',
+      favorito: Boolean(raw.favorito ?? false),
+      tags:     Array.isArray(raw.tags) ? (raw.tags as string[]) : [],
       ativo: {
         nomeEstudo:        String(rawAtivo.nomeEstudo    ?? ''),
         nomeUsina:         String(rawAtivo.nomeUsina     ?? ''),
@@ -252,6 +298,7 @@ export function migrateStudy(raw: Record<string, unknown>): Study {
         demanda:           Number(rawAtivo.demanda        ?? 0),
         consumoAnualUG:    Number(rawAtivo.consumoAnualUG ?? 0),
         geracaoMediaMensal,
+        estado:            String(rawAtivo.estado ?? ''),
       },
       tarifas: {
         tusdG:         Number(rawTarifas?.tusdG         ?? 0),
@@ -301,6 +348,9 @@ export function migrateStudy(raw: Record<string, unknown>): Study {
 
   return {
     ...(raw as object),
+    status:   (raw.status as StudyStatus) ?? 'Em Elaboração',
+    favorito: Boolean(raw.favorito ?? false),
+    tags:     Array.isArray(raw.tags) ? (raw.tags as string[]) : [],
     criadoEm:    (raw.criadoEm    as string) ?? new Date().toISOString(),
     atualizadoEm:(raw.atualizadoEm as string) ?? new Date().toISOString(),
     ativo: {
@@ -314,6 +364,7 @@ export function migrateStudy(raw: Record<string, unknown>): Study {
       demanda:           Number(du.demanda        ?? 0),
       consumoAnualUG:    Number(du.consumoAnualUG ?? 0),
       geracaoMediaMensal:calcGeracaoMensal(potencia, fc),
+      estado:            String(du.estado ?? ''),
     },
     tarifas: {
       tusdG:         Number(tarifas.tusdGeracao ?? tarifas.tusd ?? 0),

@@ -1,8 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
-import MainLayout    from './layouts/MainLayout'
-import DashboardPage from './pages/DashboardPage'
-import StudyFormPage from './pages/StudyFormPage'
+import MainLayout        from './layouts/MainLayout'
+import DashboardPage     from './pages/DashboardPage'
+import StudyFormPage     from './pages/StudyFormPage'
+import OportunidadesPage from './pages/OportunidadesPage'
 
 export default function App() {
   return (
@@ -11,6 +12,7 @@ export default function App() {
         <Route element={<MainLayout><DashboardPage /></MainLayout>} path="/" />
         <Route element={<MainLayout><StudyFormPage /></MainLayout>} path="/estudos/novo" />
         <Route element={<MainLayout><StudyFormPage /></MainLayout>} path="/estudos/:id/editar" />
+        <Route element={<MainLayout><OportunidadesPage /></MainLayout>} path="/oportunidades" />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 

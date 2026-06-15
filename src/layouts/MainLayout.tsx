@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Menu, X, Zap,
-  BarChart2, Settings, FileText,
+  BarChart2, Settings, FileText, TrendingUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -16,10 +16,11 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: 'Dashboard',    to: '/',          icon: <LayoutDashboard className="w-4 h-4" /> },
-  { label: 'Relatorios',   to: '/relatorios', icon: <FileText        className="w-4 h-4" />, disabled: true, badge: 'Em breve' },
-  { label: 'Analises',     to: '/analises',   icon: <BarChart2       className="w-4 h-4" />, disabled: true, badge: 'Em breve' },
-  { label: 'Configuracoes',to: '/config',     icon: <Settings        className="w-4 h-4" />, disabled: true, badge: 'Em breve' },
+  { label: 'Dashboard',     to: '/',             icon: <LayoutDashboard className="w-4 h-4" /> },
+  { label: 'Oportunidades', to: '/oportunidades', icon: <TrendingUp      className="w-4 h-4" /> },
+  { label: 'Relatorios',    to: '/relatorios',    icon: <FileText        className="w-4 h-4" />, disabled: true, badge: 'Em breve' },
+  { label: 'Analises',      to: '/analises',      icon: <BarChart2       className="w-4 h-4" />, disabled: true, badge: 'Em breve' },
+  { label: 'Configuracoes', to: '/config',        icon: <Settings        className="w-4 h-4" />, disabled: true, badge: 'Em breve' },
 ]
 
 function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () => void }) {
@@ -102,8 +103,8 @@ function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () => void }
             <Zap className="w-3 h-3 text-primary" />
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-foreground truncate">INVEST GD v1.1</p>
-            <p className="text-[10px] text-muted-foreground">Fase 1.1</p>
+            <p className="text-xs font-medium text-foreground truncate">INVEST GD v2.0</p>
+            <p className="text-[10px] text-muted-foreground">Fase 03</p>
           </div>
         </div>
       </div>

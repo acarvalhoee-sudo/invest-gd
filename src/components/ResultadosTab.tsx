@@ -15,7 +15,7 @@ import {
 import {
   ChevronLeft, Save,
   TrendingUp, TrendingDown, Minus,
-  FileDown, Loader2, BarChart3, FileText,
+  BarChart3, FileText,
 } from 'lucide-react'
 
 import { calcResultados }    from '@/utils/financialEngine'
@@ -24,7 +24,6 @@ import type { ResultadosFinanceiros } from '@/types/results'
 import { fmtBRL, fmtNum, fmtPct }    from '@/utils/formatters'
 import { Button }     from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { gerarRelatorioPDF }     from '@/services/pdfService'
 import RelatorioExecutivoTab     from '@/components/RelatorioExecutivoTab'
 
 /* ── Cores legado ───────────────────────────────────────────── */
@@ -215,14 +214,8 @@ export default function ResultadosTab({ study, saving, onSave, onBack, isNew }: 
   const pbSimp = res.paybackSimples    != null ? `${fmtNum(res.paybackSimples, 1)} anos`    : 'Não atingido'
   const pbDesc = res.paybackDescontado != null ? `${fmtNum(res.paybackDescontado, 1)} anos` : 'Não atingido'
 
-  const [gerandoPDF, setGerandoPDF] = useState(false)
   const [viewMode, setViewMode]     = useState<'relatorio' | 'detalhe'>('relatorio')
 
-  const handleGerarPDF = useCallback(async () => {
-    setGerandoPDF(true)
-    try { await gerarRelatorioPDF(study, res) }
-    finally { setGerandoPDF(false) }
-  }, [study, res])
 
   return (
     <div className="space-y-5">
@@ -257,16 +250,6 @@ export default function ResultadosTab({ study, saving, onSave, onBack, isNew }: 
           </button>
         </div>
 
-        {/* PDF — sempre visível */}
-        <Button
-          onClick={handleGerarPDF}
-          disabled={gerandoPDF}
-          className="bg-[#0B5E3B] hover:bg-[#094d30] text-white gap-2 shrink-0"
-        >
-          {gerandoPDF
-            ? <><Loader2 className="w-4 h-4 animate-spin" /> Gerando PDF...</>
-            : <><FileDown className="w-4 h-4" /> Gerar PDF</>}
-        </Button>
       </div>
 
       {/* ══ RELATÓRIO EXECUTIVO ══════════════════════════════════ */}
@@ -319,7 +302,7 @@ export default function ResultadosTab({ study, saving, onSave, onBack, isNew }: 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
               <IndicadorCard label="Geração Média Mensal"  value={`${fmtNum(res.geracaoMediaMensal, 1)} MWh`}  sub={`${fmtNum(res.geracaoMediaMensal * 12, 0)} MWh/ano`} />
               <IndicadorCard label="Receita Bruta — Ano 1" value={fmtBRL(res.receitaAnual, 0)}   sub="Primeiro ano de operação" />
-              <IndicadorCard label="EBITDA — Ano 1"        value={fmtBRL(res.ebitdaAnual, 0)}    sub="Rec. Líquida − OPEX"     positive={res.ebitdaAnual > 0 ? true : false} />
+              <IndicadorCard label="Receita Líquida — Ano 1" value={fmtBRL(res.ebitdaAnual, 0)}   sub="Rec. Bruta − Tributos − OPEX" positive={res.ebitdaAnual > 0 ? true : false} />
               <IndicadorCard label="CAPEX Total"           value={fmtBRL(res.capex, 0)}          sub="Investimento inicial" />
               <IndicadorCard label="Payback Simples"       value={pbSimp} />
               <IndicadorCard label="Payback Descontado"    value={pbDesc} />

@@ -1,7 +1,7 @@
 /**
  * RelatorioExecutivoTab.tsx — v10
  */
-import { useMemo } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import {
   AreaChart, Area, ComposedChart, Bar, Line,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -11,6 +11,8 @@ import { FONTE_LABELS } from '@/types/study'
 import type { Study } from '@/types/study'
 import type { ResultadosFinanceiros } from '@/types/results'
 import { fmtBRL, fmtNum } from '@/utils/formatters'
+import { Download, Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 const V   = '#0B5E3B'
 const VL  = '#f0fdf4'
@@ -128,6 +130,44 @@ function ChartTip({active,payload,label}:{active?:boolean;payload?:{name:string;
 
 interface Props { study: Study; res: ResultadosFinanceiros }
 
+
+async function exportPDF(nomeUsina: string) {
+  const el = document.getElementById('executive-report-export')
+  if (!el) { window.print(); return }
+  try {
+    const html2canvas = (await import('html2canvas')).default
+    const { jsPDF }   = await import('jspdf')
+    const canvas = await html2canvas(el, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+    })
+    const imgData  = canvas.toDataURL('image/png')
+    const pdfW     = 297  // A4 landscape mm
+    const pdfH     = 210
+    const ratio    = canvas.height / canvas.width
+    const imgH     = pdfW * ratio
+    const pdf      = new jsPDF({ orientation: imgH > pdfH ? 'portrait' : 'landscape', unit: 'mm', format: 'a4' })
+    const pw       = pdf.internal.pageSize.getWidth()
+    const ph       = pdf.internal.pageSize.getHeight()
+    let   yOffset  = 0
+    const imgWidth = pw
+    const imgHeightOnPage = pw * (canvas.height / canvas.width)
+    while (yOffset < imgHeightOnPage) {
+      if (yOffset > 0) pdf.addPage()
+      pdf.addImage(imgData, 'PNG', 0, -yOffset, imgWidth, imgHeightOnPage)
+      yOffset += ph
+    }
+    const safe = (nomeUsina || 'USINA').toUpperCase().replace(/[^A-Z0-9]/g, '-').replace(/-+/g, '-')
+    const date = new Date().toISOString().slice(0, 10)
+    pdf.save(`INVEST-GD_${safe}_${date}.pdf`)
+  } catch (e) {
+    console.error('PDF error', e)
+    window.print()
+  }
+}
+
 export default function RelatorioExecutivoTab({ study, res }: Props) {
   const at  = study.ativo
   const tar = study.tarifas
@@ -205,8 +245,37 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
 
   const CHART_H = 230
 
+  const [exporting, setExporting] = useState(false)
+  const handleExport = useCallback(async () => {
+    setExporting(true)
+    await exportPDF(at.nomeUsina || at.nomeEstudo || 'USINA')
+    setExporting(false)
+  }, [at])
+
   return (
-    <div style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif",color:'#1e293b',display:'flex',flexDirection:'column',gap:24}}>
+    <div style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif", display:'flex', flexDirection:'column', gap:0}}>
+      {/* Export button — outside exported area */}
+      <div style={{display:'flex', justifyContent:'flex-end', marginBottom:12}}>
+        <Button
+          onClick={handleExport}
+          disabled={exporting}
+          style={{gap:6, background:'#0B5E3B', color:'white', border:'none'}}
+        >
+          {exporting
+            ? <><Loader2 className="w-4 h-4 animate-spin" /> Gerando PDF...</>
+            : <><Download className="w-4 h-4" /> Exportar PDF</>
+          }
+        </Button>
+      </div>
+      {/* Exported area */}
+      <div id="executive-report-export" style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif"}}>
+        {/* CSS for PDF page-break protection */}
+        <style>{`
+          #executive-report-export .pdf-section { page-break-inside: avoid; break-inside: avoid; }
+          #executive-report-export .pdf-avoid   { page-break-inside: avoid; break-inside: avoid; }
+          #executive-report-export .pdf-before  { page-break-before: always; break-before: page; }
+        `}</style>
+        <div style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif",color:'#1e293b',display:'flex',flexDirection:'column',gap:24}}>
 
       {/* CABEÇALHO */}
       <div style={{background:'white',borderRadius:12,border:'1px solid #e2e8f0',boxShadow:'0 1px 8px rgba(0,0,0,.06)',display:'flex',alignItems:'center',padding:'18px 24px',gap:18}}>
@@ -246,7 +315,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
           <KpiCard label="VPL (R$)"           color={V}  icon={<IcoBar/>}    value={fmtBRL(res.vpl,0).replace('R$','').trim()} sub="Valor Presente Líquido"/>
           <KpiCard label="TIR (% a.a.)"       color={OR} icon={<IcoPct/>}    value={res.tir != null ? `${tirStr}%` : '—'}  sub={`TMA: ${fmtNum(pf.tma,2)}%`}/>
           <KpiCard label="Payback"            color={OR} icon={<IcoClock/>}  value={pbStr + (res.paybackSimples != null ? ' anos' : '')} sub="Retorno do capital"/>
-          <KpiCard label="EBITDA Acumulado"   color={V}  icon={<IcoDollar/>} value={fmtBRL(ebitdaAcum,0).replace('R$','').trim()} sub={`Ciclo ${pf.vidaUtil} anos`}/>
+          <KpiCard label="Rec. Líquida Acumulada" color={V}  icon={<IcoDollar/>} value={fmtBRL(ebitdaAcum,0).replace('R$','').trim()} sub={`Ciclo ${pf.vidaUtil} anos`}/>
           <KpiCard label="CAPEX Total (R$)"   color={OR} icon={<IcoCoins/>}  value={fmtBRL(res.capex,0).replace('R$','').trim()} sub="Investimento total"/>
           <KpiCard label="Geração Anual (MWh)" color={V} icon={<IcoLight/>} value={fmtNum(geracaoAno,1)} sub={`${fmtNum(at.geracaoMediaMensal,1)} MWh/mês`}/>
         </div>
@@ -309,7 +378,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
               <MiniKpi label="Payback Simples"             value={pbStr+(res.paybackSimples != null?' anos':'')} accent={OR}/>
               <MiniKpi label={`Rec. Bruta Ano ${anoLast?.ano ?? pf.vidaUtil}`} value={fmtBRL(recBrutaLast,0)} accent={V}/>
               <MiniKpi label={`Rec. Líq. Ano ${anoLast?.ano ?? pf.vidaUtil}`} value={fmtBRL(recLiqLast,0)} accent={V}/>
-              <MiniKpi label="EBITDA Acumulado"            value={fmtBRL(ebitdaAcum,0)}   accent={OR}/>
+              <MiniKpi label="Rec. Líquida Acumulada"      value={fmtBRL(ebitdaAcum,0)}   accent={OR}/>
               <MiniKpi label="Receita Acumulada"           value={fmtBRL(recBrutaAcum,0)} accent={V}/>
             </div>
           </div>
@@ -359,7 +428,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         </div>
 
         {/* Gráfico 1 — Receita Líquida */}
-        <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
+        <div className="pdf-avoid" style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
           <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Receita Líquida por Ano (R$)</p>
           <ResponsiveContainer width="100%" height={CHART_H}>
             <AreaChart data={chartData} margin={{top:6,right:24,left:12,bottom:0}}>
@@ -373,7 +442,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         </div>
 
         {/* Gráfico 2 — Receita Bruta × OPEX */}
-        <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
+        <div className="pdf-avoid" style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
           <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Evolução da Receita Bruta e OPEX (R$)</p>
           <ResponsiveContainer width="100%" height={CHART_H}>
             <ComposedChart data={chartData} margin={{top:6,right:24,left:12,bottom:0}}>
@@ -389,7 +458,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         </div>
 
         {/* Gráfico 3 — Fluxo Acumulado */}
-        <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
+        <div className="pdf-avoid" style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
           <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Fluxo Acumulado (R$)</p>
           <ResponsiveContainer width="100%" height={CHART_H}>
             <AreaChart data={fluxoData} margin={{top:6,right:24,left:12,bottom:0}}>
@@ -403,7 +472,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         </div>
 
         {/* Conclusão */}
-        <div style={{background:'#f8fafc',borderRadius:10,padding:'14px 16px',border:'1px solid #e2e8f0',display:'flex',gap:12,alignItems:'flex-start'}}>
+        <div className="pdf-avoid" style={{background:'#f8fafc',borderRadius:10,padding:'14px 16px',border:'1px solid #e2e8f0',display:'flex',gap:12,alignItems:'flex-start'}}>
           <div style={{flexShrink:0,background:VL,borderRadius:'50%',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center'}}>
             <IcoCheck/>
           </div>
@@ -425,6 +494,8 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
           Engenharia e Conservação de Energia — Análise gerada em {new Date().toLocaleDateString('pt-BR')}
         </p>
       </div>
+    </div>
+    </div>
     </div>
   )
 }

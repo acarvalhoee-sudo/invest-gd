@@ -10,7 +10,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, Save, ChevronRight, ChevronLeft,
   Building2, CircleDollarSign, BarChart2,
-  Info, CheckCircle2, Zap,
+  Info, CheckCircle2, Zap, Layers, GitCompare, Activity,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -35,7 +35,10 @@ import {
   SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import ResultadosTab from '@/components/ResultadosTab'
+import ResultadosTab       from '@/components/ResultadosTab'
+import ScenariosTab      from '@/components/tabs/ScenariosTab'
+import ComparativoTab    from '@/components/tabs/ComparativoTab'
+import SensibilidadeTab  from '@/components/tabs/SensibilidadeTab'
 
 // ─── Helpers UI ───────────────────────────────────────────────
 
@@ -103,9 +106,12 @@ function NumInput({
 // ─── Wizard ───────────────────────────────────────────────────
 
 const STEPS = [
-  { id: 'ativo',      label: 'Ativo',      icon: <Building2        className="w-4 h-4" /> },
-  { id: 'premissas',  label: 'Premissas',  icon: <CircleDollarSign className="w-4 h-4" /> },
-  { id: 'resultados', label: 'Resultados', icon: <BarChart2         className="w-4 h-4" /> },
+  { id: 'ativo',        label: 'Ativo',        icon: <Building2        className="w-4 h-4" /> },
+  { id: 'premissas',    label: 'Premissas',    icon: <CircleDollarSign className="w-4 h-4" /> },
+  { id: 'resultados',   label: 'Resultados',   icon: <BarChart2         className="w-4 h-4" /> },
+  { id: 'cenarios',     label: 'Cenarios',     icon: <Layers           className="w-4 h-4" /> },
+  { id: 'comparativo',  label: 'Comparativo',  icon: <GitCompare       className="w-4 h-4" /> },
+  { id: 'sensibilidade',label: 'Sensibilidade',icon: <Activity         className="w-4 h-4" /> },
 ]
 
 function WizardHeader({ current, onChange }: {
@@ -256,6 +262,9 @@ export default function StudyFormPage() {
         capex:                state.capex,
         opex:                 state.opex,
         premissasFinanceiras: state.premissasFinanceiras,
+        status:               'Em Elaboração',
+        favorito:             false,
+        tags:                 [],
       }
 
       let docId = savedId
@@ -314,6 +323,9 @@ export default function StudyFormPage() {
     capex:                state.capex,
     opex:                 state.opex,
     premissasFinanceiras: state.premissasFinanceiras,
+    status:               'Em Elaboração',
+    favorito:             false,
+    tags:                 [],
     criadoEm:             new Date().toISOString(),
     atualizadoEm:         new Date().toISOString(),
   }
@@ -742,6 +754,60 @@ export default function StudyFormPage() {
             onBack={() => setStep(1)}
             isNew={isNew}
           />
+        )}
+
+        {/* ════════════════════════════════════ */}
+        {/* ABA 3 — CENARIOS                     */}
+        {/* ════════════════════════════════════ */}
+        {step === 3 && (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <Button variant="outline" size="sm" onClick={() => setStep(2)}>
+                <ChevronLeft className="w-4 h-4" /> Resultados
+              </Button>
+              <Button size="sm" onClick={() => setStep(4)}>
+                Comparativo <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+            <ScenariosTab
+              study={studyParaResultados}
+              studyId={savedId ?? undefined}
+            />
+          </div>
+        )}
+
+        {/* ════════════════════════════════════ */}
+        {/* ABA 4 — COMPARATIVO                  */}
+        {/* ════════════════════════════════════ */}
+        {step === 4 && (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <Button variant="outline" size="sm" onClick={() => setStep(3)}>
+                <ChevronLeft className="w-4 h-4" /> Cenarios
+              </Button>
+              <Button size="sm" onClick={() => setStep(5)}>
+                Sensibilidade <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+            <ComparativoTab
+              study={studyParaResultados}
+              studyId={savedId ?? undefined}
+            />
+          </div>
+        )}
+
+        {/* ════════════════════════════════════ */}
+        {/* ABA 5 — SENSIBILIDADE                */}
+        {/* ════════════════════════════════════ */}
+        {step === 5 && (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <Button variant="outline" size="sm" onClick={() => setStep(4)}>
+                <ChevronLeft className="w-4 h-4" /> Comparativo
+              </Button>
+            </div>
+            <SensibilidadeTab study={studyParaResultados} />
+          </div>
         )}
 
       </div>

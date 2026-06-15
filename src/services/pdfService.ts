@@ -411,7 +411,7 @@ export async function gerarRelatorioPDF(study: Study, res: ResultadosFinanceiros
     { label: 'Valor Presente Líquido',    value: brl(vpl),                           unit: 'R$  ·  VPL',                              accent: vpl >= 0 ? 'green' : 'red' },
     { label: 'Taxa Interna de Retorno',   value: tir ? `${num(tir, 2)}%` : '—',    unit: `a.a.  ·  TMA: ${num(pf.tma, 2)}%`,       accent: tir && tir > pf.tma ? 'orange' : 'red' },
     { label: 'Payback Simples',           value: pb ? `${num(pb, 1)} anos` : '—',  unit: 'Retorno do capital investido',            accent: 'orange' },
-    { label: 'EBITDA Acumulado',           value: brl(ebitdaAcum),                    unit: `R$  ·  Ciclo ${pf.vidaUtil} anos`,         accent: 'green' },
+    { label: 'Rec. Líquida Acumulada',    value: brl(ebitdaAcum),                    unit: `R$  ·  Ciclo ${pf.vidaUtil} anos`,         accent: 'green' },
     { label: 'CAPEX Total',               value: brl(capex.total),                   unit: 'R$  ·  Investimento total',               accent: 'gray' },
     { label: 'Geração Anual',             value: brl(geranual),                      unit: `MWh  ·  ${num(geramens, 1)} MWh/mês`,    accent: 'green' },
   ]
@@ -472,7 +472,7 @@ export async function gerarRelatorioPDF(study: Study, res: ResultadosFinanceiros
   // Second paragraph (complementary analysis)
   const p2Y = divY + 26
   const p2 = tir && tir > pf.tma
-    ? `A receita bruta estimada para o primeiro ano é de R$ ${brl(rec1)}, com geração anual projetada de ${brl(geranual)} MWh. O período de vida útil de ${pf.vidaUtil} anos permite amortização confortável do CAPEX de R$ ${brl(capex.total)}, com EBITDA do primeiro ano de R$ ${brl(ebitda1)}.`
+    ? `A receita bruta estimada para o primeiro ano é de R$ ${brl(rec1)}, com geração anual projetada de ${brl(geranual)} MWh. O período de vida útil de ${pf.vidaUtil} anos permite amortização confortável do CAPEX de R$ ${brl(capex.total)}, com Receita Líquida do primeiro ano de R$ ${brl(ebitda1)}.`
     : `A receita bruta estimada para o primeiro ano é de R$ ${brl(rec1)}, com geração anual projetada de ${brl(geranual)} MWh. Recomenda-se análise detalhada de sensibilidade nas premissas tarifárias e de CAPEX para identificar alavancas de melhoria da rentabilidade.`
   st(doc, PRETO); doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
   const p2Lines = doc.splitTextToSize(p2, CW - 20)
@@ -591,13 +591,13 @@ export async function gerarRelatorioPDF(study: Study, res: ResultadosFinanceiros
   interface DstDef { label: string; value: string; unit: string; accent: Accent }
   const dstItems: DstDef[] = [
     { label: 'Rec. Bruta Ano 1',               value: `R$ ${brl(rec1)}`,                  unit: '',                              accent: 'green'  },
-    { label: 'Rec. Líquida Ano 1',             value: `R$ ${brl(ebitda1)}`,               unit: 'EBITDA',                        accent: 'green'  },
+    { label: 'Rec. Líquida Ano 1',             value: `R$ ${brl(ebitda1)}`,               unit: 'Rec. Bruta − Tributos − OPEX',  accent: 'green'  },
     { label: 'TIR (% a.a.)',                   value: tir ? `${num(tir, 2)}%` : '—',     unit: `TMA: ${num(pf.tma, 2)}%`,      accent: tir && tir > pf.tma ? 'orange' : 'red' },
     { label: 'VPL',                            value: `R$ ${brl(vpl)}`,                   unit: 'Valor Presente Líquido',        accent: vpl >= 0 ? 'green' : 'red' },
     { label: 'Payback Simples',                value: pb ? `${num(pb, 1)} anos` : '—',   unit: 'Retorno do capital',            accent: 'orange' },
     { label: `Rec. Bruta Ano ${anoLast?.ano ?? pf.vidaUtil}`, value: `R$ ${brl(recBrutaLast)}`, unit: 'Último ano',            accent: 'green'  },
     { label: `Rec. Líq. Ano ${anoLast?.ano ?? pf.vidaUtil}`,  value: `R$ ${brl(recLiqLast)}`,  unit: 'Último ano',            accent: 'orange' },
-    { label: 'EBITDA Acumulado',               value: `R$ ${brl(ebitdaAcum)}`,            unit: `Ciclo ${pf.vidaUtil} anos`,     accent: 'orange' },
+    { label: 'Rec. Líquida Acumulada',         value: `R$ ${brl(ebitdaAcum)}`,            unit: `Ciclo ${pf.vidaUtil} anos`,     accent: 'orange' },
     { label: 'Receita Acumulada',              value: `R$ ${brl(recBrutaAcum)}`,          unit: `Ciclo ${pf.vidaUtil} anos`,     accent: 'green'  },
   ]
 
@@ -678,7 +678,7 @@ export async function gerarRelatorioPDF(study: Study, res: ResultadosFinanceiros
     doc, ML, chartStart, chartW, chartH,
     'Receita Líquida por Ano (R$)',
     chartRows.map(r => r.ano),
-    [{ label: 'Receita Líquida (EBITDA)', values: chartRows.map(r => r.ebitda), color: VERDE }],
+    [{ label: 'Receita Líquida',          values: chartRows.map(r => r.ebitda), color: VERDE }],
   )
 
   // Chart 2 — Receita Bruta vs OPEX

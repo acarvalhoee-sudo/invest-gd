@@ -43,6 +43,10 @@
  * VPL (estilo Excel NPV):
  *   VPL = Σ fluxo[t] / (1+TMA)^(t+1)  para t=0..N  (todos os fluxos descontados 1 período extra)
  *
+ * PAYBACK DESCONTADO:
+ *   Ano 0: fluxoDescontadoAcumulado = −CAPEX  (t=0, fator=(1+TMA)^0=1)
+ *   Ano N: fluxoDesc = fluxo / (1+TMA)^N ; acumula até ≥ 0
+ *
  * TIR: Newton-Raphson sobre fluxos padrão (resultado idêntico)
  */
 
@@ -144,7 +148,12 @@ export function calcResultados(study: Study): ResultadosFinanceiros {
   let fluxoDescAcum = 0
   const fluxosBrutos: number[] = []
 
-  /* ── Ano 0 — CAPEX ── */
+  /* ── Ano 0 — CAPEX ──
+     O CAPEX é desembolsado em t=0:
+     fluxoDescontado = −CAPEX / (1+TMA)^0 = −CAPEX
+     Portanto fluxoDescAcum inicia em −CAPEX para que o payback
+     descontado seja calculado corretamente (≥ payback simples).
+  */
   const rowAno0: AnoRow = {
     ano: 0, meses: 0,
     geracao: 0, receitaBruta: 0, tributos: 0, receitaLiquida: 0,
@@ -153,10 +162,11 @@ export function calcResultados(study: Study): ResultadosFinanceiros {
     ebitda: 0,
     fluxo: -capexTotal,
     fluxoAcumulado:           -capexTotal,
-    fluxoDescontado:          0,
-    fluxoDescontadoAcumulado: 0,
+    fluxoDescontado:          -capexTotal,
+    fluxoDescontadoAcumulado: -capexTotal,
   }
-  fluxoAcum = -capexTotal
+  fluxoAcum     = -capexTotal
+  fluxoDescAcum = -capexTotal
   fluxosBrutos.push(-capexTotal)
   tabela.push(rowAno0)
 
@@ -259,13 +269,16 @@ export function calcResultados(study: Study): ResultadosFinanceiros {
       opDemanda + opManutencao + opGestao + opFixoGestao +
       opArrendamento + opOperacao + opSeguro
 
-    /* ── EBITDA = Rec. Líquida − OPEX ── */
+    /* ── Receita Líquida (= Rec.Bruta − Tributos − OPEX) ── */
     const ebitda = receitaLiq - opexTotal
     const fluxo  = ebitda
 
     fluxoAcum += fluxo
 
-    /* Fluxo descontado: desconto padrão para payback descontado */
+    /* ── Fluxo Descontado para Payback Descontado ──
+       fluxoDesc = fluxo / (1 + TMA)^ano
+       Acumula sobre fluxoDescAcum que já parte de −CAPEX (Ano 0)
+    */
     const fatorDesc   = Math.pow(1 + tma / 100, ano)
     const fluxoDesc   = fluxo / fatorDesc
     fluxoDescAcum    += fluxoDesc
@@ -294,7 +307,9 @@ export function calcResultados(study: Study): ResultadosFinanceiros {
   /* ── TIR ── */
   const tir = calcTIR(fluxosBrutos)
 
-  /* ── Payback Simples ── */
+  /* ── Payback Simples ──
+     Primeiro ano em que o fluxo acumulado (sem desconto) cruza zero.
+  */
   let paybackSimples: number | null = null
   for (const row of tabela) {
     if (row.ano > 0 && row.fluxoAcumulado >= 0) {
@@ -309,7 +324,11 @@ export function calcResultados(study: Study): ResultadosFinanceiros {
     }
   }
 
-  /* ── Payback Descontado ── */
+  /* ── Payback Descontado ──
+     Primeiro ano em que o fluxo descontado acumulado cruza zero.
+     Sempre >= paybackSimples porque os fluxos descontados crescem mais
+     lentamente do que os fluxos nominais.
+  */
   let paybackDescontado: number | null = null
   for (const row of tabela) {
     if (row.ano > 0 && row.fluxoDescontadoAcumulado >= 0) {

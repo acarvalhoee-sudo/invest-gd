@@ -1,11 +1,13 @@
 /**
- * useStudies.ts
- * Hook para gerenciar a lista de estudos
+ * useStudies.ts — Fase 03
  */
-
 import { useState, useEffect, useCallback } from 'react'
-import { listStudies, deleteStudy, duplicateStudy } from '@/services/studyService'
-import type { Study } from '@/types/study'
+import {
+  listStudies, deleteStudy, duplicateStudy,
+  updateStatus as svcUpdateStatus,
+  toggleFavorito as svcToggleFavorito,
+} from '@/services/studyService'
+import type { Study, StudyStatus } from '@/types/study'
 import toast from 'react-hot-toast'
 
 export function useStudies() {
@@ -45,7 +47,7 @@ export function useStudies() {
     try {
       const newId = await duplicateStudy(id)
       await load()
-      toast.success('Estudo duplicado.')
+      toast.success('Estudo duplicado com sucesso.')
       return newId
     } catch {
       toast.error('Erro ao duplicar estudo.')
@@ -53,5 +55,27 @@ export function useStudies() {
     }
   }
 
-  return { studies, loading, error, reload: load, remove, duplicate }
+  async function moveStatus(id: string, status: StudyStatus): Promise<void> {
+    try {
+      await svcUpdateStatus(id, status)
+      setStudies((prev) =>
+        prev.map((s) => s.id === id ? { ...s, status } : s)
+      )
+    } catch {
+      toast.error('Erro ao atualizar status.')
+    }
+  }
+
+  async function toggleFav(id: string, favorito: boolean): Promise<void> {
+    try {
+      await svcToggleFavorito(id, favorito)
+      setStudies((prev) =>
+        prev.map((s) => s.id === id ? { ...s, favorito } : s)
+      )
+    } catch {
+      toast.error('Erro ao atualizar favorito.')
+    }
+  }
+
+  return { studies, loading, error, reload: load, remove, duplicate, moveStatus, toggleFav }
 }
