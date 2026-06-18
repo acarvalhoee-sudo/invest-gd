@@ -214,8 +214,10 @@ export default function ResultadosTab({ study, saving, onSave, onBack, isNew }: 
   const pbSimp = res.paybackSimples    != null ? `${fmtNum(res.paybackSimples, 1)} anos`    : 'Não atingido'
   const pbDesc = res.paybackDescontado != null ? `${fmtNum(res.paybackDescontado, 1)} anos` : 'Não atingido'
 
-  const [viewMode, setViewMode]     = useState<'relatorio' | 'detalhe'>('relatorio')
+  const receitaBrutaTotal   = res.tabela.filter(r => r.ano > 0).reduce((s, r) => s + r.receitaBruta, 0)
+  const receitaLiquidaTotal = res.tabela.filter(r => r.ano > 0).reduce((s, r) => s + r.ebitda,       0)
 
+  const [viewMode, setViewMode] = useState<'relatorio' | 'detalhe'>('relatorio')
 
   return (
     <div className="space-y-5">
@@ -300,12 +302,12 @@ export default function ResultadosTab({ study, saving, onSave, onBack, isNew }: 
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              <IndicadorCard label="Geração Média Mensal"  value={`${fmtNum(res.geracaoMediaMensal, 1)} MWh`}  sub={`${fmtNum(res.geracaoMediaMensal * 12, 0)} MWh/ano`} />
-              <IndicadorCard label="Receita Bruta — Ano 1" value={fmtBRL(res.receitaAnual, 0)}   sub="Primeiro ano de operação" />
-              <IndicadorCard label="Receita Líquida — Ano 1" value={fmtBRL(res.ebitdaAnual, 0)}   sub="Rec. Bruta − Tributos − OPEX" positive={res.ebitdaAnual > 0 ? true : false} />
-              <IndicadorCard label="CAPEX Total"           value={fmtBRL(res.capex, 0)}          sub="Investimento inicial" />
-              <IndicadorCard label="Payback Simples"       value={pbSimp} />
-              <IndicadorCard label="Payback Descontado"    value={pbDesc} />
+              <IndicadorCard label="Geração Média Mensal"    value={`${fmtNum(res.geracaoMediaMensal, 1)} MWh`} sub={`${fmtNum(res.geracaoMediaMensal * 12, 0)} MWh/ano`} />
+              <IndicadorCard label="Receita Bruta — TOTAL"   value={fmtBRL(receitaBrutaTotal, 0)}               sub="Soma de todos os anos" />
+              <IndicadorCard label="Receita Líquida — TOTAL" value={fmtBRL(receitaLiquidaTotal, 0)}             sub="Rec. Bruta − Tributos − OPEX" positive={receitaLiquidaTotal > 0 ? true : false} />
+              <IndicadorCard label="CAPEX Total"             value={fmtBRL(res.capex, 0)}                       sub="Investimento inicial" />
+              <IndicadorCard label="Payback Simples"         value={pbSimp} />
+              <IndicadorCard label="Payback Descontado"      value={pbDesc} />
             </div>
           </section>
 
