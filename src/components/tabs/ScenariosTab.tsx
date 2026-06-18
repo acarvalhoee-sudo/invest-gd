@@ -9,7 +9,8 @@ import { Button }      from '@/components/ui/button'
 import { Input }       from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { MoneyInput } from '@/components/ui/money-input'
-import type { Study }  from '@/types/study'
+import type { Study, FonteGeracao, TipoGD }  from '@/types/study'
+import { FONTE_LABELS } from '@/types/study'
 import type { Scenario, ScenarioParams } from '@/types/scenario'
 import { paramsFromStudy } from '@/types/scenario'
 import { useScenarios } from '@/hooks/useScenarios'
@@ -128,13 +129,33 @@ function Section({ title, children, open = true }: { title: string; children: Re
   )
 }
 
+/* ── Opções para selects ── */
+const FONTE_OPTIONS: { value: FonteGeracao; label: string }[] = [
+  { value: 'cgh',      label: 'CGH' },
+  { value: 'pch',      label: 'PCH' },
+  { value: 'ufv',      label: 'UFV' },
+  { value: 'solar',    label: 'Solar' },
+  { value: 'eolica',   label: 'Eólica' },
+  { value: 'biomassa', label: 'Biomassa' },
+  { value: 'biogas',   label: 'Biogás' },
+  { value: 'outros',   label: 'Outros' },
+]
+const TIPOGD_OPTIONS: TipoGD[] = ['GD I', 'GD II', 'GD III']
+
 /* ── Default params from study ── */
 const DEFAULT_PARAMS: ScenarioParams = {
+  // Dados técnicos
+  potencia: 500, demanda: 500, fatorCapacidade: 55,
+  consumoAnualUG: 0, fonte: 'cgh', tipoGD: 'GD II',
+  // Tarifas
   tarifaVenda: 500, tusdG: 15, reajusteAnual: 5,
-  fatorCapacidade: 55,
+  // CAPEX
   capexTotal: 5000000,
+  // OPEX
   opexOperacao: 1, opexManutencao: 1, opexSeguro: 0.5, opexGestao: 2, opexArrendamento: 0, opexFixoGestao: 0,
+  // Tributos
   tributosReceita: 0, pis: 1.65, cofins: 7.6, icms: 0,
+  // Premissas
   tma: 10, selic: 10.75, ipca: 4.5, vidaUtil: 20,
 }
 
@@ -172,6 +193,13 @@ export default function ScenariosTab({
   function setP<K extends keyof ScenarioParams>(k: K, v: ScenarioParams[K]) {
     setParams((prev) => ({ ...prev, [k]: v }))
   }
+
+  /* Geração calculada automaticamente a partir dos dados técnicos do cenário */
+  const geracaoMensal = useMemo(
+    () => params.potencia * (params.fatorCapacidade / 100) * 730 / 1000,
+    [params.potencia, params.fatorCapacidade]
+  )
+  const geracaoAnual = geracaoMensal * 12
 
   /* Preview live dos resultados */
   const preview = useMemo(() => {
@@ -285,7 +313,7 @@ export default function ScenariosTab({
 
         {/* Preview live */}
         {preview && (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
             <Kpi label="TIR" value={pct(preview.tir)} color={preview.tir != null && preview.tir > 0 ? '#15803d' : '#dc2626'} />
             <Kpi label="VPL" value={money(preview.vpl)} color={preview.vpl >= 0 ? '#15803d' : '#dc2626'} />
             <Kpi label="Payback" value={preview.paybackSimples != null ? fmtNum(preview.paybackSimples, 1) + ' anos' : '—'} />
@@ -293,14 +321,57 @@ export default function ScenariosTab({
             <Kpi label="EBITDA Acum." value={money(preview.ebitdaAcumulado)} />
           </div>
         )}
+        {/* Geração calculada automaticamente */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+          <Kpi label="Geração Mensal" value={fmtNum(geracaoMensal, 1) + ' MWh'} />
+          <Kpi label="Geração Anual" value={fmtNum(geracaoAnual, 1) + ' MWh'} />
+          <Kpi label="Receita Acumulada" value={money(preview?.receitaAcumulada)} />
+        </div>
 
         {/* Parametros */}
+        <Section title="Dados Técnicos do Ativo">
+          <div style={{ display: 'grid', gridTemplateColumns: g, gap: 10 }}>
+            <NumField label="Potência Instalada" suffix="kW" value={params.potencia} onChange={(v) => setP('potencia', v)} />
+            <NumField label="Demanda Contratada" suffix="kW" value={params.demanda} onChange={(v) => setP('demanda', v)} />
+            <NumField label="Fator de Capacidade" suffix="%" value={params.fatorCapacidade} onChange={(v) => setP('fatorCapacidade', v)} hint="Recalcula geração e receita automaticamente" />
+            <NumField label="Consumo Anual UG" suffix="MWh/ano" value={params.consumoAnualUG} onChange={(v) => setP('consumoAnualUG', v)} />
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: '#475569', display: 'block', marginBottom: 3 }}>
+                Fonte de Energia
+              </label>
+              <select
+                value={params.fonte}
+                onChange={(e) => setP('fonte', e.target.value as FonteGeracao)}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: 7, border: '1px solid #e2e8f0', fontSize: 13, outline: 'none', fontFamily: 'inherit', background: 'white' }}
+              >
+                {FONTE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: '#475569', display: 'block', marginBottom: 3 }}>
+                Tipo GD
+              </label>
+              <select
+                value={params.tipoGD}
+                onChange={(e) => setP('tipoGD', e.target.value as TipoGD)}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: 7, border: '1px solid #e2e8f0', fontSize: 13, outline: 'none', fontFamily: 'inherit', background: 'white' }}
+              >
+                {TIPOGD_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          </div>
+          {/* Geração recalculada inline */}
+          <div style={{ marginTop: 10, padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0', fontSize: 11, color: '#15803d' }}>
+            ↻ Geração calculada: <strong>{fmtNum(geracaoMensal, 2)} MWh/mês</strong> · <strong>{fmtNum(geracaoAnual, 1)} MWh/ano</strong>
+            {' '}({params.potencia} kW × {params.fatorCapacidade}% × 730 h ÷ 1000)
+          </div>
+        </Section>
+
         <Section title="Tarifas">
           <div style={{ display: 'grid', gridTemplateColumns: g, gap: 10 }}>
             <NumField label="Tarifa de Venda" suffix="R$/MWh" value={params.tarifaVenda} onChange={(v) => setP('tarifaVenda', v)} />
             <NumField label="TUSD G" suffix="R$/kW/mes" value={params.tusdG} onChange={(v) => setP('tusdG', v)} />
             <NumField label="Reajuste Anual" suffix="%" value={params.reajusteAnual} onChange={(v) => setP('reajusteAnual', v)} />
-            <NumField label="Fator de Capacidade" suffix="%" value={params.fatorCapacidade} onChange={(v) => setP('fatorCapacidade', v)} />
           </div>
         </Section>
 

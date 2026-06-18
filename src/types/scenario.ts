@@ -1,23 +1,28 @@
 /**
  * scenario.ts — Tipos para o módulo de Cenários (FASE 04)
  */
-import type { Opex, Tributos } from '@/types/study'
+import type { Opex, Tributos, FonteGeracao, TipoGD } from '@/types/study'
 
 /** Parâmetros editáveis de um cenário (sobrescrevem o estudo base) */
 export interface ScenarioParams {
+  // Dados Técnicos do Ativo
+  potencia:          number           // kW
+  demanda:           number           // kW
+  fatorCapacidade:   number           // %
+  consumoAnualUG:    number           // MWh/ano
+  fonte:             FonteGeracao     // tipo da fonte
+  tipoGD:            TipoGD          // GD I / GD II / GD III
   // Tarifas
   tarifaVenda:       number   // R$/MWh
   tusdG:             number   // R$/kW/mês
   reajusteAnual:     number   // % a.a.
-  // Ativo
-  fatorCapacidade:   number   // %
   // CAPEX
   capexTotal:        number   // R$
-  // OPEX (% sobre CAPEX exceto arrendamento e fixoGestao que são R$/mês)
-  opexOperacao:      number
-  opexManutencao:    number
-  opexSeguro:        number
-  opexGestao:        number
+  // OPEX (% anual sobre CAPEX exceto arrendamento e fixoGestao que são R$/mês)
+  opexOperacao:      number   // % a.a. do CAPEX
+  opexManutencao:    number   // % a.a. do CAPEX
+  opexSeguro:        number   // % a.a. do CAPEX
+  opexGestao:        number   // % da Receita
   opexArrendamento:  number   // R$/mês
   opexFixoGestao:    number   // R$/mês
   // Tributos
@@ -61,28 +66,39 @@ export interface Scenario {
 /** Monta ScenarioParams a partir dos dados de um estudo */
 export function paramsFromStudy(study: {
   tarifas:              { tarifaVenda: number; tusdG: number; reajusteAnual: number }
-  ativo:                { fatorCapacidade: number }
+  ativo:                { potencia: number; demanda: number; fatorCapacidade: number; consumoAnualUG: number; fonte: FonteGeracao; tipoGD: TipoGD }
   capex:                { total: number }
   opex:                 Opex
   tributos:             Tributos
   premissasFinanceiras: { tma: number; selic: number; inflacao: number; vidaUtil: number }
 }): ScenarioParams {
   return {
+    // Dados técnicos
+    potencia:         study.ativo.potencia,
+    demanda:          study.ativo.demanda,
+    fatorCapacidade:  study.ativo.fatorCapacidade,
+    consumoAnualUG:   study.ativo.consumoAnualUG,
+    fonte:            study.ativo.fonte,
+    tipoGD:           study.ativo.tipoGD,
+    // Tarifas
     tarifaVenda:      study.tarifas.tarifaVenda,
     tusdG:            study.tarifas.tusdG,
     reajusteAnual:    study.tarifas.reajusteAnual,
-    fatorCapacidade:  study.ativo.fatorCapacidade,
+    // CAPEX
     capexTotal:       study.capex.total,
+    // OPEX
     opexOperacao:     study.opex.operacao,
     opexManutencao:   study.opex.manutencao,
     opexSeguro:       study.opex.seguro,
     opexGestao:       study.opex.gestao,
     opexArrendamento: study.opex.arrendamento,
     opexFixoGestao:   study.opex.fixoGestao,
+    // Tributos
     tributosReceita:  study.tributos.tributosReceita,
     pis:              study.tributos.pis,
     cofins:           study.tributos.cofins,
     icms:             study.tributos.icms,
+    // Premissas
     tma:              study.premissasFinanceiras.tma,
     selic:            study.premissasFinanceiras.selic,
     ipca:             study.premissasFinanceiras.inflacao,

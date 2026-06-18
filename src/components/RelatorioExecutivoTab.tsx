@@ -234,13 +234,29 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
     ['IPCA (% a.a.)',                 fmtNum(pf.inflacao, 2) + '%'],
     ['Vida Útil (anos)',         String(pf.vidaUtil)],
   ]
+  // Valores calculados do OPEX para o memorial (ano cheio = referência)
+  const opexAnualOperacao  = cap.total * (op.operacao   / 100)
+  const opexAnualManutencao= cap.total * (op.manutencao / 100)
+  const opexAnualSeguro    = cap.total * (op.seguro     / 100)
+
   const opexRows: [string,string][] = [
-    ['Operação',          fmtNum(op.operacao, 2) + '%'],
-    ['Manutenção',        fmtNum(op.manutencao, 2) + '%'],
-    ['Seguro',                       fmtNum(op.seguro, 2) + '%'],
-    ['Gestão (% Receita)',      fmtNum(op.gestao, 2) + '%'],
-    ['Arrendamento/mês',        fmtBRL(op.arrendamento, 0)],
-    ['Gestão Fixo/mês',   fmtBRL(op.fixoGestao, 0)],
+    ['── Operação ──',       ''],
+    ['  Taxa (% CAPEX/ano)', fmtNum(op.operacao, 2) + '%'],
+    ['  CAPEX',              fmtBRL(cap.total, 0)],
+    ['  Valor Anual',        fmtBRL(opexAnualOperacao, 0)],
+    ['  Valor Mensal',       fmtBRL(opexAnualOperacao / 12, 2)],
+    ['── Manutenção ──',     ''],
+    ['  Taxa (% CAPEX/ano)', fmtNum(op.manutencao, 2) + '%'],
+    ['  Valor Anual',        fmtBRL(opexAnualManutencao, 0)],
+    ['  Valor Mensal',       fmtBRL(opexAnualManutencao / 12, 2)],
+    ['── Seguro ──',         ''],
+    ['  Taxa (% CAPEX/ano)', fmtNum(op.seguro, 2) + '%'],
+    ['  Valor Anual',        fmtBRL(opexAnualSeguro, 0)],
+    ['  Valor Mensal',       fmtBRL(opexAnualSeguro / 12, 2)],
+    ['── Gestão ──',         ''],
+    ['  Taxa (% Receita)',   fmtNum(op.gestao, 2) + '%'],
+    ['  Arrendamento/mês',   fmtBRL(op.arrendamento, 0)],
+    ['  Gestão Fixa/mês',   fmtBRL(op.fixoGestao, 0)],
   ]
 
   const CHART_H = 230

@@ -17,17 +17,26 @@ import type { Study }      from '@/types/study'
 
 /** Monta um Study parcial com os params do cenario para passar ao motor */
 function applyParams(base: Study, p: ScenarioParams): Study {
+  // Recalcula geração mensal com os dados técnicos do cenário
+  const geracaoMediaMensal = p.potencia * (p.fatorCapacidade / 100) * 730 / 1000
+
   return {
     ...base,
+    ativo: {
+      ...base.ativo,
+      potencia:          p.potencia,
+      demanda:           p.demanda,
+      fatorCapacidade:   p.fatorCapacidade,
+      consumoAnualUG:    p.consumoAnualUG,
+      fonte:             p.fonte,
+      tipoGD:            p.tipoGD,
+      geracaoMediaMensal,
+    },
     tarifas: {
       ...base.tarifas,
       tarifaVenda:   p.tarifaVenda,
       tusdG:         p.tusdG,
       reajusteAnual: p.reajusteAnual,
-    },
-    ativo: {
-      ...base.ativo,
-      fatorCapacidade: p.fatorCapacidade,
     },
     capex: {
       ...base.capex,
