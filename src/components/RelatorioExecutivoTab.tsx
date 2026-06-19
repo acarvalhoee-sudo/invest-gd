@@ -1,10 +1,11 @@
 /**
- * RelatorioExecutivoTab.tsx — v13
- * Fix produção: html2canvas agora em package.json.
- * handleExport robusto: pré-carrega logo como dataURL,
- * onclone substitui <img> para evitar CORS, logs detalhados.
+ * RelatorioExecutivoTab.tsx — v14
+ * Fix produção: imports estáticos (não dinâmicos) para html2canvas e jsPDF.
+ * Fallback window.print() se a geração falhar.
  */
 import { useMemo, useState, useCallback } from 'react'
+import html2canvas from 'html2canvas'
+import jsPDF from 'jspdf'
 import {
   AreaChart, Area, ComposedChart, Bar, Line,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -131,7 +132,7 @@ function ChartTip({active,payload,label}:{active?:boolean;payload?:{name:string;
   )
 }
 
-/** Pré-carrega uma URL como dataURL para evitar CORS no html2canvas */
+/** Pre-carrega uma URL como dataURL para evitar CORS no html2canvas */
 async function fetchAsDataURL(url: string): Promise<string | null> {
   try {
     const resp = await fetch(url, { mode: 'cors', cache: 'force-cache' })
@@ -171,7 +172,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
   const viavel       = res.vpl > 0
   const tirStr       = res.tir != null ? fmtNum(res.tir, 2) : '—'
   const pbStr        = res.paybackSimples != null ? fmtNum(res.paybackSimples, 1) : 'N/A'
-  const viavel_str   = viavel ? 'Ativo Viável para Investimento' : 'Ativo Requer Avaliação Adicional'
+  const viavel_str   = viavel ? 'Ativo Viavel para Investimento' : 'Ativo Requer Avaliacao Adicional'
   const isSolar      = at.fonte === 'ufv' || at.fonte === 'solar'
   const potUnit      = isSolar ? 'kWp' : 'kW'
 
@@ -184,7 +185,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
     ...chartData,
   ], [chartData, res])
 
-  const parecer = `O ativo apresenta TIR de ${tirStr}% a.a.${res.tir != null ? `, ${res.tir > pf.tma ? 'superior' : 'inferior'} à TMA de ${fmtNum(pf.tma, 2)}% a.a.,` : ','} com Payback de ${pbStr} anos e VPL ${res.vpl > 0 ? 'positivo' : 'negativo'}. A receita bruta estimada para o primeiro ano é de ${fmtBRL(recBruta1, 0)}, com geração anual projetada de ${fmtNum(geracaoAno, 1)} MWh. No último ano do ciclo (ano ${anoLast?.ano ?? pf.vidaUtil}), a receita bruta projetada é de ${fmtBRL(recBrutaLast, 0)} e a líquida de ${fmtBRL(recLiqLast, 0)}.`
+  const parecer = `O ativo apresenta TIR de ${tirStr}% a.a.${res.tir != null ? `, ${res.tir > pf.tma ? 'superior' : 'inferior'} a TMA de ${fmtNum(pf.tma, 2)}% a.a.,` : ','} com Payback de ${pbStr} anos e VPL ${res.vpl > 0 ? 'positivo' : 'negativo'}. A receita bruta estimada para o primeiro ano e de ${fmtBRL(recBruta1, 0)}, com geracao anual projetada de ${fmtNum(geracaoAno, 1)} MWh. No ultimo ano do ciclo (ano ${anoLast?.ano ?? pf.vidaUtil}), a receita bruta projetada e de ${fmtBRL(recBrutaLast, 0)} e a liquida de ${fmtBRL(recLiqLast, 0)}.`
 
   const IcoTec  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="10" width="20" height="10" rx="1"/><line x1="7" y1="10" x2="7" y2="20"/><line x1="12" y1="10" x2="12" y2="20"/><line x1="17" y1="10" x2="17" y2="20"/><path d="M2 15h20"/></svg>
   const IcoFin  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
@@ -194,13 +195,13 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
 
   const tec: [string,string][] = [
     ['Fonte de Energia',              FONTE_LABELS[at.fonte] ?? at.fonte],
-    [`Potência Instalada (${potUnit})`, fmtNum(at.potencia, 0)],
+    [`Potencia Instalada (${potUnit})`, fmtNum(at.potencia, 0)],
     ['Fator de Capacidade (%)',       fmtNum(at.fatorCapacidade, 2) + '%'],
     ['Tipo de GD',                    at.tipoGD],
-    ['Concessionária',           at.concessionaria || '—'],
+    ['Concessionaria',                at.concessionaria || '—'],
     ['Consumo Anual (MWh)',           fmtNum(at.consumoAnualUG / 1000, 1)],
-    ['Geração Mensal (MWh)', fmtNum(at.geracaoMediaMensal, 1)],
-    ['Geração Anual (MWh)',  fmtNum(geracaoAno, 1)],
+    ['Geracao Mensal (MWh)',          fmtNum(at.geracaoMediaMensal, 1)],
+    ['Geracao Anual (MWh)',           fmtNum(geracaoAno, 1)],
   ]
   const fin: [string,string][] = [
     ['TUSD G (R$/kW)',                fmtNum(tar.tusdG, 4)],
@@ -213,81 +214,68 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
     ['TMA (% a.a.)',                  fmtNum(pf.tma, 2) + '%'],
     ['SELIC (% a.a.)',                fmtNum(pf.selic, 2) + '%'],
     ['IPCA (% a.a.)',                 fmtNum(pf.inflacao, 2) + '%'],
-    ['Vida Útil (anos)',         String(pf.vidaUtil)],
+    ['Vida Util (anos)',              String(pf.vidaUtil)],
   ]
   const opexAnualOperacao  = cap.total * (op.operacao   / 100)
   const opexAnualManutencao= cap.total * (op.manutencao / 100)
   const opexAnualSeguro    = cap.total * (op.seguro     / 100)
 
   const opexRows: [string,string][] = [
-    ['── Operação ──',       ''],
+    ['-- Operacao --',       ''],
     ['  Taxa (% CAPEX/ano)', fmtNum(op.operacao, 2) + '%'],
     ['  CAPEX',              fmtBRL(cap.total, 0)],
     ['  Valor Anual',        fmtBRL(opexAnualOperacao, 0)],
     ['  Valor Mensal',       fmtBRL(opexAnualOperacao / 12, 2)],
-    ['── Manutenção ──',     ''],
+    ['-- Manutencao --',     ''],
     ['  Taxa (% CAPEX/ano)', fmtNum(op.manutencao, 2) + '%'],
     ['  Valor Anual',        fmtBRL(opexAnualManutencao, 0)],
     ['  Valor Mensal',       fmtBRL(opexAnualManutencao / 12, 2)],
-    ['── Seguro ──',         ''],
+    ['-- Seguro --',         ''],
     ['  Taxa (% CAPEX/ano)', fmtNum(op.seguro, 2) + '%'],
     ['  Valor Anual',        fmtBRL(opexAnualSeguro, 0)],
     ['  Valor Mensal',       fmtBRL(opexAnualSeguro / 12, 2)],
-    ['── Gestão ──',         ''],
+    ['-- Gestao --',         ''],
     ['  Taxa (% Receita)',   fmtNum(op.gestao, 2) + '%'],
-    ['  Arrendamento/mês',   fmtBRL(op.arrendamento, 0)],
-    ['  Gestão Fixa/mês',   fmtBRL(op.fixoGestao, 0)],
+    ['  Arrendamento/mes',   fmtBRL(op.arrendamento, 0)],
+    ['  Gestao Fixa/mes',    fmtBRL(op.fixoGestao, 0)],
   ]
 
   const CHART_H = 230
 
-  /* ══════════════════════════════════════════════════════════════════
-   * handleExport — robusto para produção (Vercel)
+  /* =====================================================================
+   * handleExport v14 — imports estaticos, fallback window.print()
    *
-   * Correções vs. versão anterior:
-   *  1. html2canvas agora em package.json → importação funciona em prod
-   *  2. Logo pré-carregada como dataURL (evita CORS no canvas)
-   *  3. onclone substitui <img> pelo dataURL ou remove se não carregar
-   *  4. Logs detalhados por etapa no console
-   *  5. finally garante reset do estado mesmo em caso de erro
+   * html2canvas e jsPDF importados estaticamente no topo do modulo.
+   * Isso garante que o Vercel inclua as libs no bundle e nao falhe
+   * com "Falha ao carregar biblioteca de PDF".
    *
    * Grupos de captura:
    *  P1: exec-header | exec-resumo | exec-prem-group1
    *  P2: exec-prem-group2 | exec-fin-group1 | exec-chart1
    *  P3: exec-charts-group
-   * ════════════════════════════════════════════════════════════════ */
+   * ================================================================== */
   const [exporting, setExporting] = useState(false)
   const handleExport = useCallback(async () => {
     setExporting(true)
     try {
-      console.log('[PDF] Iniciando exportação...')
+      console.log('[PDF] Iniciando exportacao...')
+      console.log('[PDF] html2canvas disponivel:', typeof html2canvas)
+      console.log('[PDF] jsPDF disponivel:', typeof jsPDF)
 
-      // 1. Importações dinâmicas
-      let html2canvas: typeof import('html2canvas')['default']
-      let jsPDF: typeof import('jspdf')['default']
-      try {
-        html2canvas = (await import('html2canvas')).default
-        jsPDF       = (await import('jspdf')).default
-        console.log('[PDF] Bibliotecas carregadas.')
-      } catch (importErr) {
-        console.error('[PDF] Falha ao importar html2canvas ou jsPDF:', importErr)
-        throw new Error('Falha ao carregar biblioteca de PDF. Verifique a conexão.')
-      }
-
-      // 2. Container principal
+      // 1. Container principal
       const container = document.getElementById('executive-report-export')
       if (!container) {
-        throw new Error('Elemento #executive-report-export não encontrado no DOM.')
+        throw new Error('Elemento #executive-report-export nao encontrado no DOM.')
       }
       console.log('[PDF] Container encontrado.')
 
-      // 3. Pré-carrega logo como dataURL (evita bloqueio de CORS no canvas)
+      // 2. Pre-carrega logo como dataURL (evita bloqueio de CORS no canvas)
       console.log('[PDF] Carregando logo...')
       const logoDataURL = await fetchAsDataURL('/solfus-logo.png.png')
-      if (!logoDataURL) console.warn('[PDF] Logo não carregou — será omitida do PDF.')
-      else console.log('[PDF] Logo carregada.')
+      if (!logoDataURL) console.warn('[PDF] Logo nao carregou - sera omitida do PDF.')
+      else console.log('[PDF] Logo carregada com sucesso.')
 
-      // 4. Opções do html2canvas
+      // 3. Opcoes do html2canvas
       const SCALE  = 1.8
       const GAP_PX = Math.round(24 * SCALE)
       const BG     = '#f8fafc'
@@ -295,16 +283,15 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
       const ww     = container.scrollWidth
 
       const h2cOptions = (el: HTMLElement) => ({
-        scale:       SCALE,
-        useCORS:     true,
-        allowTaint:  false,
+        scale:           SCALE,
+        useCORS:         true,
+        allowTaint:      false,
         backgroundColor: BG,
-        logging:     false,
-        scrollX:     0,
-        scrollY:     0,
-        windowWidth: ww,
-        windowHeight: el.scrollHeight,
-        /** Substitui <img> pela versão dataURL para não travar o canvas CORS */
+        logging:         false,
+        scrollX:         0,
+        scrollY:         0,
+        windowWidth:     ww,
+        windowHeight:    el.scrollHeight,
         onclone: (_doc: Document, cloned: HTMLElement) => {
           const imgs = cloned.querySelectorAll('img')
           imgs.forEach(img => {
@@ -317,23 +304,23 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         },
       })
 
-      // 5. Captura e composição de grupos de seções
+      // 4. Captura e composicao de grupos de secoes
       const captureGroup = async (ids: string[]): Promise<HTMLCanvasElement> => {
         console.log('[PDF] Capturando grupo:', ids)
         const canvases: HTMLCanvasElement[] = []
         for (const id of ids) {
           const el = document.getElementById(id)
           if (!el) {
-            console.warn(`[PDF] Elemento #${id} não encontrado — ignorado.`)
+            console.warn(`[PDF] Elemento #${id} nao encontrado - ignorado.`)
             continue
           }
           try {
             const c = await html2canvas(el, h2cOptions(el))
             canvases.push(c)
-            console.log(`[PDF] #${id} capturado (${c.width}×${c.height}px)`)
+            console.log(`[PDF] #${id} capturado (${c.width}x${c.height}px)`)
           } catch (captureErr) {
             console.error(`[PDF] Erro ao capturar #${id}:`, captureErr)
-            throw new Error(`Falha ao capturar seção #${id}`)
+            throw new Error(`Falha ao capturar secao #${id}`)
           }
         }
         if (canvases.length === 0) throw new Error(`Nenhum elemento capturado: ${ids.join(', ')}`)
@@ -353,7 +340,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         return out
       }
 
-      // 6. PDF
+      // 5. PDF
       const pdf      = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
       const pdfW     = pdf.internal.pageSize.getWidth()
       const pdfH     = pdf.internal.pageSize.getHeight()
@@ -365,7 +352,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         const imgH_mm   = canvas.height * mmPerPx
         const sliceH_px = contentH / mmPerPx
         const pages     = Math.ceil(imgH_mm / contentH)
-        console.log(`[PDF] Adicionando página — ${pages} fatia(s), altura ${imgH_mm.toFixed(1)}mm`)
+        console.log(`[PDF] Adicionando pagina - ${pages} fatia(s), altura ${imgH_mm.toFixed(1)}mm`)
         for (let p = 0; p < pages; p++) {
           if (!(isFirstGroup && p === 0)) pdf.addPage()
           const srcY = p * sliceH_px
@@ -379,18 +366,18 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         }
       }
 
-      // Página 1 — Cabeçalho + Resumo + Premissas (3 cards)
+      // Pagina 1 - Cabecalho + Resumo + Premissas (3 cards)
       addToPDF(await captureGroup(['exec-header', 'exec-resumo', 'exec-prem-group1']), true)
 
-      // Página 2 — Investimento + Destaques + Tabela + Receita Líquida
+      // Pagina 2 - Investimento + Destaques + Tabela + Receita Liquida
       addToPDF(await captureGroup(['exec-prem-group2', 'exec-fin-group1', 'exec-chart1']), false)
 
-      // Página 3 — Receita Bruta + Fluxo + Conclusão + Banner
+      // Pagina 3 - Receita Bruta + Fluxo + Conclusao + Banner
       addToPDF(await captureGroup(['exec-charts-group']), false)
 
-      // 7. Salvar
+      // 6. Salvar
       const nome = (study.ativo.nomeUsina || 'USINA')
-        .normalize('NFD').replace(/[̀-ͯ]/g, '')  // remove acentos
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
         .replace(/[^a-zA-Z0-9]/g, '-').toUpperCase()
       const filename = `INVEST-GD_${nome}_${new Date().toISOString().slice(0, 10)}.pdf`
       pdf.save(filename)
@@ -399,17 +386,20 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
     } catch (e) {
       console.error('[PDF] Erro ao gerar PDF:', e)
       const msg = e instanceof Error ? e.message : String(e)
-      alert(`Erro ao gerar PDF: ${msg}\n\nConsulte o console do navegador (F12) para detalhes.`)
+      const usePrint = window.confirm(
+        `Erro ao gerar PDF: ${msg}\n\nDeseja usar a impressao do navegador como alternativa?\nClique OK para abrir ou Cancelar para fechar.`
+      )
+      if (usePrint) window.print()
     } finally {
       setExporting(false)
     }
   }, [study])
 
-  /* ═════════════════ JSX ═════════════════════════════════════════ */
+  /* ========== JSX ========== */
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif",display:'flex',flexDirection:'column',gap:0}}>
 
-      {/* Botão — fora do container de captura */}
+      {/* Botao - fora do container de captura */}
       <div style={{display:'flex',justifyContent:'flex-end',marginBottom:12}}>
         <Button onClick={handleExport} disabled={exporting}
           style={{gap:6,background:'#0B5E3B',color:'white',border:'none'}}>
@@ -419,23 +409,23 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         </Button>
       </div>
 
-      {/* ── Área de captura ── */}
+      {/* Area de captura */}
       <div id="executive-report-export" style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif"}}>
         <div style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif",color:'#1e293b',display:'flex',flexDirection:'column',gap:24}}>
 
-          {/* ═══ P1-A: CABEÇALHO ════════════════════════════════════════ */}
+          {/* P1-A: CABECALHO */}
           <div id="exec-header" style={{background:'white',borderRadius:12,border:'1px solid #e2e8f0',boxShadow:'0 1px 8px rgba(0,0,0,.06)',display:'flex',alignItems:'center',padding:'18px 24px',gap:18}}>
             <div style={{flexShrink:0}}>
               <img src="/solfus-logo.png.png" alt="SOLFUS" style={{height:72,objectFit:'contain',display:'block'}}/>
             </div>
             <div style={{flex:1,textAlign:'center'}}>
-              <p style={{fontSize:22,fontWeight:900,color:'#1e293b',margin:0,letterSpacing:2,textTransform:'uppercase'}}>Relatório Executivo</p>
-              <p style={{fontSize:8.5,color:'#94a3b8',margin:'4px 0 8px',letterSpacing:1,textTransform:'uppercase'}}>Análise de viabilidade para aquisição de ativo de geração</p>
+              <p style={{fontSize:22,fontWeight:900,color:'#1e293b',margin:0,letterSpacing:2,textTransform:'uppercase'}}>Relatorio Executivo</p>
+              <p style={{fontSize:8.5,color:'#94a3b8',margin:'4px 0 8px',letterSpacing:1,textTransform:'uppercase'}}>Analise de viabilidade para aquisicao de ativo de geracao</p>
               <div style={{width:52,height:3,background:V,borderRadius:2,margin:'0 auto'}}/>
             </div>
             <div style={{flexShrink:0,border:`1.5px solid ${V}`,borderRadius:10,overflow:'hidden',minWidth:185}}>
               <div style={{background:VL,padding:'6px 12px',borderBottom:`1px solid ${V}22`}}>
-                <p style={{fontSize:10,fontWeight:800,color:V,margin:0,textTransform:'uppercase',letterSpacing:1}}>Ativo em Análise</p>
+                <p style={{fontSize:10,fontWeight:800,color:V,margin:0,textTransform:'uppercase',letterSpacing:1}}>Ativo em Analise</p>
               </div>
               <div style={{padding:'10px 12px',display:'flex',flexDirection:'column',gap:6}}>
                 <div style={{display:'flex',alignItems:'center',gap:8}}>
@@ -454,16 +444,16 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
             </div>
           </div>
 
-          {/* ═══ P1-B: RESUMO EXECUTIVO ═════════════════════════════════ */}
+          {/* P1-B: RESUMO EXECUTIVO */}
           <div id="exec-resumo" style={{display:'flex',flexDirection:'column',gap:14}}>
             <SecTitle title="Resumo Executivo" num="2"/>
             <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-              <KpiCard label="VPL (R$)"               color={V}  icon={<IcoBar/>}    value={fmtBRL(res.vpl,0).replace('R$','').trim()} sub="Valor Presente Líquido"/>
+              <KpiCard label="VPL (R$)"               color={V}  icon={<IcoBar/>}    value={fmtBRL(res.vpl,0).replace('R$','').trim()} sub="Valor Presente Liquido"/>
               <KpiCard label="TIR (% a.a.)"           color={OR} icon={<IcoPct/>}    value={res.tir != null ? `${tirStr}%` : '—'} sub={`TMA: ${fmtNum(pf.tma,2)}%`}/>
               <KpiCard label="Payback"                color={OR} icon={<IcoClock/>}  value={pbStr+(res.paybackSimples!=null?' anos':'')} sub="Retorno do capital"/>
-              <KpiCard label="Rec. Líquida Acumulada" color={V}  icon={<IcoDollar/>} value={fmtBRL(ebitdaAcum,0).replace('R$','').trim()} sub={`Ciclo ${pf.vidaUtil} anos`}/>
+              <KpiCard label="Rec. Liquida Acumulada" color={V}  icon={<IcoDollar/>} value={fmtBRL(ebitdaAcum,0).replace('R$','').trim()} sub={`Ciclo ${pf.vidaUtil} anos`}/>
               <KpiCard label="CAPEX Total (R$)"       color={OR} icon={<IcoCoins/>}  value={fmtBRL(res.capex,0).replace('R$','').trim()} sub="Investimento total"/>
-              <KpiCard label="Geração Anual (MWh)"    color={V}  icon={<IcoLight/>}  value={fmtNum(geracaoAno,1)} sub={`${fmtNum(at.geracaoMediaMensal,1)} MWh/mês`}/>
+              <KpiCard label="Geracao Anual (MWh)"    color={V}  icon={<IcoLight/>}  value={fmtNum(geracaoAno,1)} sub={`${fmtNum(at.geracaoMediaMensal,1)} MWh/mes`}/>
             </div>
             <div style={{background:'#f8fafc',borderRadius:10,padding:'14px 16px',border:'1px solid #e2e8f0',display:'flex',gap:12,alignItems:'flex-start'}}>
               <div style={{flexShrink:0,marginTop:2,background:VL,borderRadius:'50%',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center'}}>
@@ -477,17 +467,17 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
             <Banner text={viavel_str}/>
           </div>
 
-          {/* ═══ P1-C: PREMISSAS 3 CARDS ════════════════════════════════ */}
+          {/* P1-C: PREMISSAS 3 CARDS */}
           <div id="exec-prem-group1" style={{display:'flex',flexDirection:'column',gap:14}}>
             <SecTitle title="Premissas e Investimentos" num="3"/>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14,alignItems:'stretch'}}>
-              <PremCard title="Dados Técnicos"    color={V}  rows={tec}      icon={<IcoTec/>}/>
+              <PremCard title="Dados Tecnicos"    color={V}  rows={tec}      icon={<IcoTec/>}/>
               <PremCard title="Dados Financeiros" color={OR} rows={fin}      icon={<IcoFin/>}/>
               <PremCard title="OPEX (% CAPEX)"    color={SL} rows={opexRows} icon={<IcoOp/>}/>
             </div>
           </div>
 
-          {/* ═══ P2-A: INVESTIMENTO + DESTAQUES ════════════════════════ */}
+          {/* P2-A: INVESTIMENTO + DESTAQUES */}
           <div id="exec-prem-group2" style={{display:'flex',flexDirection:'column',gap:14}}>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1.6fr',gap:14,alignItems:'stretch'}}>
               <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
@@ -505,7 +495,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
                       <p style={{fontSize:13,fontWeight:800,color:'#1e293b',margin:0}}>{fmtBRL(opex1,0)}</p>
                     </div>
                     <div style={{background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0',padding:'9px 12px'}}>
-                      <p style={{fontSize:8.5,color:SL,margin:'0 0 2px',fontWeight:600,textTransform:'uppercase'}}>Meses 1º Ano</p>
+                      <p style={{fontSize:8.5,color:SL,margin:'0 0 2px',fontWeight:600,textTransform:'uppercase'}}>Meses 1 Ano</p>
                       <p style={{fontSize:13,fontWeight:800,color:'#1e293b',margin:0}}>{pf.mesesPrimeiroAno} meses</p>
                     </div>
                   </div>
@@ -518,20 +508,20 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
                 </div>
                 <div style={{padding:'12px 10px',display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
                   <MiniKpi label="Rec. Bruta Ano 1"   value={fmtBRL(recBruta1,0)}  accent={V}/>
-                  <MiniKpi label="Rec. Líquida Ano 1" value={fmtBRL(recLiq1,0)}    accent={OR}/>
+                  <MiniKpi label="Rec. Liquida Ano 1" value={fmtBRL(recLiq1,0)}    accent={OR}/>
                   <MiniKpi label="TIR (% a.a.)"       value={res.tir!=null?`${tirStr}%`:'—'} accent={OR}/>
                   <MiniKpi label="VPL (R$)"           value={fmtBRL(res.vpl,0)}    accent={V}/>
                   <MiniKpi label="Payback Simples"    value={pbStr+(res.paybackSimples!=null?' anos':'')} accent={OR}/>
                   <MiniKpi label={`Rec. Bruta Ano ${anoLast?.ano??pf.vidaUtil}`} value={fmtBRL(recBrutaLast,0)} accent={V}/>
-                  <MiniKpi label={`Rec. Líq. Ano ${anoLast?.ano??pf.vidaUtil}`}  value={fmtBRL(recLiqLast,0)}  accent={V}/>
-                  <MiniKpi label="Rec. Líquida Acum." value={fmtBRL(ebitdaAcum,0)}   accent={OR}/>
+                  <MiniKpi label={`Rec. Liq. Ano ${anoLast?.ano??pf.vidaUtil}`}  value={fmtBRL(recLiqLast,0)}  accent={V}/>
+                  <MiniKpi label="Rec. Liquida Acum." value={fmtBRL(ebitdaAcum,0)}   accent={OR}/>
                   <MiniKpi label="Receita Acumulada"  value={fmtBRL(recBrutaAcum,0)} accent={V}/>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* ═══ P2-B: TABELA FINANCEIRA ════════════════════════════════ */}
+          {/* P2-B: TABELA FINANCEIRA */}
           <div id="exec-fin-group1" style={{display:'flex',flexDirection:'column',gap:16}}>
             <SecTitle title="Desempenho Financeiro" num="4"/>
             <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
@@ -542,7 +532,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
                   <thead>
                     <tr style={{background:'#f8fafc'}}>
-                      {['Ano','Receita Bruta','Tributos','OPEX Total','Receita Líquida'].map(h => (
+                      {['Ano','Receita Bruta','Tributos','OPEX Total','Receita Liquida'].map(h => (
                         <th key={h} style={{padding:'8px 12px',textAlign:h==='Ano'?'center':'right',fontWeight:700,color:'#475569',borderBottom:'1px solid #e2e8f0',whiteSpace:'nowrap'}}>{h}</th>
                       ))}
                     </tr>
@@ -554,7 +544,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
                       return (
                         <>
                           {i===5 && anoRows.length>6 && (
-                            <tr key="sep"><td colSpan={5} style={{textAlign:'center',padding:'4px',fontSize:12,color:'#94a3b8'}}>…</td></tr>
+                            <tr key="sep"><td colSpan={5} style={{textAlign:'center',padding:'4px',fontSize:12,color:'#94a3b8'}}>...</td></tr>
                           )}
                           <tr key={r.ano} style={{background:isLast?VL:i%2===0?'white':'#f8fafc',borderBottom:'1px solid #f1f5f9'}}>
                             <td style={{padding:'7px 12px',textAlign:'center',fontWeight:700,color:isLast?V:'#1e293b'}}>{r.ano}</td>
@@ -572,25 +562,25 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
             </div>
           </div>
 
-          {/* ═══ P2-C: GRÁFICO RECEITA LÍQUIDA ═════════════════════════ */}
+          {/* P2-C: GRAFICO RECEITA LIQUIDA */}
           <div id="exec-chart1" style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
-            <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Receita Líquida por Ano (R$)</p>
+            <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Receita Liquida por Ano (R$)</p>
             <ResponsiveContainer width="100%" height={CHART_H}>
               <AreaChart data={chartData} margin={{top:6,right:24,left:12,bottom:0}}>
                 <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3"/>
                 <XAxis dataKey="ano" tick={{fontSize:10,fill:'#94a3b8'}} label={{value:'Ano',position:'insideBottom',offset:-2,fontSize:10,fill:'#94a3b8'}}/>
                 <YAxis tickFormatter={fmtM} tick={{fontSize:10,fill:'#94a3b8'}} width={68}/>
                 <Tooltip content={<ChartTip/>}/>
-                <Area type="monotone" dataKey="recLiq" name="Rec. Líquida" stroke={V} strokeWidth={2.5} fill={V} fillOpacity={0.12} dot={false} activeDot={{r:5}}/>
+                <Area type="monotone" dataKey="recLiq" name="Rec. Liquida" stroke={V} strokeWidth={2.5} fill={V} fillOpacity={0.12} dot={false} activeDot={{r:5}}/>
               </AreaChart>
             </ResponsiveContainer>
           </div>
 
-          {/* ═══ P3: RECEITA BRUTA + FLUXO + CONCLUSÃO + BANNER ════════ */}
+          {/* P3: RECEITA BRUTA + FLUXO + CONCLUSAO + BANNER */}
           <div id="exec-charts-group" style={{display:'flex',flexDirection:'column',gap:16}}>
 
             <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
-              <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Evolução da Receita Bruta e OPEX (R$)</p>
+              <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Evolucao da Receita Bruta e OPEX (R$)</p>
               <ResponsiveContainer width="100%" height={CHART_H}>
                 <ComposedChart data={chartData} margin={{top:6,right:24,left:12,bottom:0}}>
                   <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3"/>
@@ -622,9 +612,9 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
                 <IcoCheck/>
               </div>
               <div>
-                <p style={{fontSize:11,fontWeight:800,color:V,textTransform:'uppercase',letterSpacing:1,margin:'0 0 5px'}}>Conclusão</p>
+                <p style={{fontSize:11,fontWeight:800,color:V,textTransform:'uppercase',letterSpacing:1,margin:'0 0 5px'}}>Conclusao</p>
                 <p style={{fontSize:11.5,color:'#475569',margin:0,lineHeight:1.7}}>
-                  O projeto apresenta TIR de {res.tir!=null?`${tirStr}%`:'—'}{res.tir!=null?`, ${res.tir>pf.tma?`superior à TMA de ${fmtNum(pf.tma,2)}%`:`abaixo da TMA de ${fmtNum(pf.tma,2)}%`},`:','} com Payback estimado em {pbStr}{res.paybackSimples!=null?' anos':''} e VPL de {fmtBRL(res.vpl,0)}, {res.vpl>0?'demonstrando viabilidade econômica sob as premissas adotadas.':'indicando necessidade de revisão das premissas do projeto.'}
+                  O projeto apresenta TIR de {res.tir!=null?`${tirStr}%`:'—'}{res.tir!=null?`, ${res.tir>pf.tma?`superior a TMA de ${fmtNum(pf.tma,2)}%`:`abaixo da TMA de ${fmtNum(pf.tma,2)}%`},`:','} com Payback estimado em {pbStr}{res.paybackSimples!=null?' anos':''} e VPL de {fmtBRL(res.vpl,0)}, {res.vpl>0?'demonstrando viabilidade economica sob as premissas adotadas.':'indicando necessidade de revisao das premissas do projeto.'}
                 </p>
               </div>
             </div>
@@ -634,7 +624,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
             <div style={{textAlign:'center',borderTop:'1px solid #e2e8f0',paddingTop:10}}>
               <p style={{fontSize:10,color:'#94a3b8',margin:0}}>
                 <span style={{color:V,fontWeight:700}}>SOLFUS</span>{' '}
-                Engenharia e Conservação de Energia — Análise gerada em {new Date().toLocaleDateString('pt-BR')}
+                Engenharia e Conservacao de Energia - Analise gerada em {new Date().toLocaleDateString('pt-BR')}
               </p>
             </div>
 
