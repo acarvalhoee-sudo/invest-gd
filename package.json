@@ -24,6 +24,7 @@
     "date-fns": "^3.2.0",
     "fast-png": "^8.0.0",
     "firebase": "^10.7.1",
+    "html2canvas": "^1.4.1",
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.4",
     "lucide-react": "^0.303.0",

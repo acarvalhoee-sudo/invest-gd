@@ -1,9 +1,8 @@
 /**
- * RelatorioExecutivoTab.tsx — v12
- * Paginação:
- *   P1: Cabeçalho + Resumo Executivo + Premissas (3 cards)
- *   P2: Investimento + Destaques + Tabela Financeira + Gráfico Receita Líquida
- *   P3: Receita Bruta + Fluxo Acumulado + Conclusão + Banner
+ * RelatorioExecutivoTab.tsx — v13
+ * Fix produção: html2canvas agora em package.json.
+ * handleExport robusto: pré-carrega logo como dataURL,
+ * onclone substitui <img> para evitar CORS, logs detalhados.
  */
 import { useMemo, useState, useCallback } from 'react'
 import {
@@ -132,6 +131,22 @@ function ChartTip({active,payload,label}:{active?:boolean;payload?:{name:string;
   )
 }
 
+/** Pré-carrega uma URL como dataURL para evitar CORS no html2canvas */
+async function fetchAsDataURL(url: string): Promise<string | null> {
+  try {
+    const resp = await fetch(url, { mode: 'cors', cache: 'force-cache' })
+    if (!resp.ok) return null
+    const blob = await resp.blob()
+    return new Promise<string>(resolve => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result as string)
+      reader.readAsDataURL(blob)
+    })
+  } catch {
+    return null
+  }
+}
+
 interface Props { study: Study; res: ResultadosFinanceiros }
 
 export default function RelatorioExecutivoTab({ study, res }: Props) {
@@ -227,42 +242,103 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
   const CHART_H = 230
 
   /* ══════════════════════════════════════════════════════════════════
-   * handleExport — 3 páginas controladas por grupo de IDs
+   * handleExport — robusto para produção (Vercel)
    *
+   * Correções vs. versão anterior:
+   *  1. html2canvas agora em package.json → importação funciona em prod
+   *  2. Logo pré-carregada como dataURL (evita CORS no canvas)
+   *  3. onclone substitui <img> pelo dataURL ou remove se não carregar
+   *  4. Logs detalhados por etapa no console
+   *  5. finally garante reset do estado mesmo em caso de erro
+   *
+   * Grupos de captura:
    *  P1: exec-header | exec-resumo | exec-prem-group1
    *  P2: exec-prem-group2 | exec-fin-group1 | exec-chart1
-   *  P3: exec-charts-group  (Receita Bruta + Fluxo + Conclusão + Banner)
+   *  P3: exec-charts-group
    * ════════════════════════════════════════════════════════════════ */
   const [exporting, setExporting] = useState(false)
   const handleExport = useCallback(async () => {
     setExporting(true)
     try {
-      const html2canvas = (await import('html2canvas')).default
-      const { default: jsPDF } = await import('jspdf')
+      console.log('[PDF] Iniciando exportação...')
 
+      // 1. Importações dinâmicas
+      let html2canvas: typeof import('html2canvas')['default']
+      let jsPDF: typeof import('jspdf')['default']
+      try {
+        html2canvas = (await import('html2canvas')).default
+        jsPDF       = (await import('jspdf')).default
+        console.log('[PDF] Bibliotecas carregadas.')
+      } catch (importErr) {
+        console.error('[PDF] Falha ao importar html2canvas ou jsPDF:', importErr)
+        throw new Error('Falha ao carregar biblioteca de PDF. Verifique a conexão.')
+      }
+
+      // 2. Container principal
+      const container = document.getElementById('executive-report-export')
+      if (!container) {
+        throw new Error('Elemento #executive-report-export não encontrado no DOM.')
+      }
+      console.log('[PDF] Container encontrado.')
+
+      // 3. Pré-carrega logo como dataURL (evita bloqueio de CORS no canvas)
+      console.log('[PDF] Carregando logo...')
+      const logoDataURL = await fetchAsDataURL('/solfus-logo.png.png')
+      if (!logoDataURL) console.warn('[PDF] Logo não carregou — será omitida do PDF.')
+      else console.log('[PDF] Logo carregada.')
+
+      // 4. Opções do html2canvas
       const SCALE  = 1.8
       const GAP_PX = Math.round(24 * SCALE)
       const BG     = '#f8fafc'
       const MARGIN = 8
+      const ww     = container.scrollWidth
 
-      const container = document.getElementById('executive-report-export')
-      if (!container) throw new Error('Container não encontrado')
-      const ww = container.scrollWidth
+      const h2cOptions = (el: HTMLElement) => ({
+        scale:       SCALE,
+        useCORS:     true,
+        allowTaint:  false,
+        backgroundColor: BG,
+        logging:     false,
+        scrollX:     0,
+        scrollY:     0,
+        windowWidth: ww,
+        windowHeight: el.scrollHeight,
+        /** Substitui <img> pela versão dataURL para não travar o canvas CORS */
+        onclone: (_doc: Document, cloned: HTMLElement) => {
+          const imgs = cloned.querySelectorAll('img')
+          imgs.forEach(img => {
+            if (logoDataURL) {
+              img.src = logoDataURL
+            } else {
+              img.style.display = 'none'
+            }
+          })
+        },
+      })
 
+      // 5. Captura e composição de grupos de seções
       const captureGroup = async (ids: string[]): Promise<HTMLCanvasElement> => {
+        console.log('[PDF] Capturando grupo:', ids)
         const canvases: HTMLCanvasElement[] = []
         for (const id of ids) {
           const el = document.getElementById(id)
-          if (!el) { console.warn(`#${id} não encontrado`); continue }
-          const c = await html2canvas(el, {
-            scale: SCALE, useCORS: true, allowTaint: false,
-            backgroundColor: BG, logging: false,
-            scrollX: 0, scrollY: 0, windowWidth: ww,
-          })
-          canvases.push(c)
+          if (!el) {
+            console.warn(`[PDF] Elemento #${id} não encontrado — ignorado.`)
+            continue
+          }
+          try {
+            const c = await html2canvas(el, h2cOptions(el))
+            canvases.push(c)
+            console.log(`[PDF] #${id} capturado (${c.width}×${c.height}px)`)
+          } catch (captureErr) {
+            console.error(`[PDF] Erro ao capturar #${id}:`, captureErr)
+            throw new Error(`Falha ao capturar seção #${id}`)
+          }
         }
-        if (canvases.length === 0) throw new Error(`Sem elementos: ${ids.join(', ')}`)
+        if (canvases.length === 0) throw new Error(`Nenhum elemento capturado: ${ids.join(', ')}`)
         if (canvases.length === 1) return canvases[0]
+
         const w = canvases[0].width
         const h = canvases.reduce((s, c, i) => s + c.height + (i > 0 ? GAP_PX : 0), 0)
         const out = document.createElement('canvas')
@@ -277,6 +353,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         return out
       }
 
+      // 6. PDF
       const pdf      = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
       const pdfW     = pdf.internal.pageSize.getWidth()
       const pdfH     = pdf.internal.pageSize.getHeight()
@@ -288,6 +365,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         const imgH_mm   = canvas.height * mmPerPx
         const sliceH_px = contentH / mmPerPx
         const pages     = Math.ceil(imgH_mm / contentH)
+        console.log(`[PDF] Adicionando página — ${pages} fatia(s), altura ${imgH_mm.toFixed(1)}mm`)
         for (let p = 0; p < pages; p++) {
           if (!(isFirstGroup && p === 0)) pdf.addPage()
           const srcY = p * sliceH_px
@@ -301,28 +379,33 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
         }
       }
 
-      // Página 1
-      const c1 = await captureGroup(['exec-header', 'exec-resumo', 'exec-prem-group1'])
-      addToPDF(c1, true)
+      // Página 1 — Cabeçalho + Resumo + Premissas (3 cards)
+      addToPDF(await captureGroup(['exec-header', 'exec-resumo', 'exec-prem-group1']), true)
 
-      // Página 2: Investimento + Destaques + Tabela + Gráfico Receita Líquida
-      const c2 = await captureGroup(['exec-prem-group2', 'exec-fin-group1', 'exec-chart1'])
-      addToPDF(c2, false)
+      // Página 2 — Investimento + Destaques + Tabela + Receita Líquida
+      addToPDF(await captureGroup(['exec-prem-group2', 'exec-fin-group1', 'exec-chart1']), false)
 
-      // Página 3: Receita Bruta + Fluxo Acumulado + Conclusão + Banner
-      const c3 = await captureGroup(['exec-charts-group'])
-      addToPDF(c3, false)
+      // Página 3 — Receita Bruta + Fluxo + Conclusão + Banner
+      addToPDF(await captureGroup(['exec-charts-group']), false)
 
-      const nome = (study.ativo.nomeUsina || 'USINA').replace(/[^a-zA-Z0-9]/g, '-').toUpperCase()
-      pdf.save(`INVEST-GD_${nome}_${new Date().toISOString().slice(0, 10)}.pdf`)
+      // 7. Salvar
+      const nome = (study.ativo.nomeUsina || 'USINA')
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')  // remove acentos
+        .replace(/[^a-zA-Z0-9]/g, '-').toUpperCase()
+      const filename = `INVEST-GD_${nome}_${new Date().toISOString().slice(0, 10)}.pdf`
+      pdf.save(filename)
+      console.log('[PDF] Exportado com sucesso:', filename)
+
     } catch (e) {
-      console.error('PDF error:', e)
-      alert('Erro ao gerar PDF. Verifique o console.')
+      console.error('[PDF] Erro ao gerar PDF:', e)
+      const msg = e instanceof Error ? e.message : String(e)
+      alert(`Erro ao gerar PDF: ${msg}\n\nConsulte o console do navegador (F12) para detalhes.`)
     } finally {
       setExporting(false)
     }
   }, [study])
 
+  /* ═════════════════ JSX ═════════════════════════════════════════ */
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif",display:'flex',flexDirection:'column',gap:0}}>
 
@@ -340,7 +423,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
       <div id="executive-report-export" style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif"}}>
         <div style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif",color:'#1e293b',display:'flex',flexDirection:'column',gap:24}}>
 
-          {/* ═══ PÁGINA 1 – A: CABEÇALHO ═══════════════════════════════════ */}
+          {/* ═══ P1-A: CABEÇALHO ════════════════════════════════════════ */}
           <div id="exec-header" style={{background:'white',borderRadius:12,border:'1px solid #e2e8f0',boxShadow:'0 1px 8px rgba(0,0,0,.06)',display:'flex',alignItems:'center',padding:'18px 24px',gap:18}}>
             <div style={{flexShrink:0}}>
               <img src="/solfus-logo.png.png" alt="SOLFUS" style={{height:72,objectFit:'contain',display:'block'}}/>
@@ -371,7 +454,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
             </div>
           </div>
 
-          {/* ═══ PÁGINA 1 – B: RESUMO EXECUTIVO ════════════════════════════ */}
+          {/* ═══ P1-B: RESUMO EXECUTIVO ═════════════════════════════════ */}
           <div id="exec-resumo" style={{display:'flex',flexDirection:'column',gap:14}}>
             <SecTitle title="Resumo Executivo" num="2"/>
             <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
@@ -394,7 +477,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
             <Banner text={viavel_str}/>
           </div>
 
-          {/* ═══ PÁGINA 1 – C: PREMISSAS (3 cards) ═════════════════════════ */}
+          {/* ═══ P1-C: PREMISSAS 3 CARDS ════════════════════════════════ */}
           <div id="exec-prem-group1" style={{display:'flex',flexDirection:'column',gap:14}}>
             <SecTitle title="Premissas e Investimentos" num="3"/>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14,alignItems:'stretch'}}>
@@ -404,7 +487,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
             </div>
           </div>
 
-          {/* ═══ PÁGINA 2 – A: INVESTIMENTO + DESTAQUES ════════════════════ */}
+          {/* ═══ P2-A: INVESTIMENTO + DESTAQUES ════════════════════════ */}
           <div id="exec-prem-group2" style={{display:'flex',flexDirection:'column',gap:14}}>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1.6fr',gap:14,alignItems:'stretch'}}>
               <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
@@ -413,9 +496,9 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
                   <p style={{fontSize:10,fontWeight:800,color:V,margin:0,textTransform:'uppercase',letterSpacing:0.9}}>Estrutura de Investimento</p>
                 </div>
                 <div style={{padding:'12px 10px',display:'flex',flexDirection:'column',gap:8}}>
-                  <InvCard label="Custo da Usina"       value={fmtBRL(cap.usina,0)}    icon={<IcoCoins/>}/>
-                  <InvCard label="Obra de Rede"         value={fmtBRL(cap.obraRede,0)} icon={<IcoEst/>}/>
-                  <InvCard label="Total do Investimento" value={fmtBRL(res.capex,0)}   highlight/>
+                  <InvCard label="Custo da Usina"        value={fmtBRL(cap.usina,0)}    icon={<IcoCoins/>}/>
+                  <InvCard label="Obra de Rede"          value={fmtBRL(cap.obraRede,0)} icon={<IcoEst/>}/>
+                  <InvCard label="Total do Investimento" value={fmtBRL(res.capex,0)}    highlight/>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:2}}>
                     <div style={{background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0',padding:'9px 12px'}}>
                       <p style={{fontSize:8.5,color:SL,margin:'0 0 2px',fontWeight:600,textTransform:'uppercase'}}>OPEX Total Ano 1</p>
@@ -441,14 +524,14 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
                   <MiniKpi label="Payback Simples"    value={pbStr+(res.paybackSimples!=null?' anos':'')} accent={OR}/>
                   <MiniKpi label={`Rec. Bruta Ano ${anoLast?.ano??pf.vidaUtil}`} value={fmtBRL(recBrutaLast,0)} accent={V}/>
                   <MiniKpi label={`Rec. Líq. Ano ${anoLast?.ano??pf.vidaUtil}`}  value={fmtBRL(recLiqLast,0)}  accent={V}/>
-                  <MiniKpi label="Rec. Líquida Acum." value={fmtBRL(ebitdaAcum,0)}    accent={OR}/>
-                  <MiniKpi label="Receita Acumulada"  value={fmtBRL(recBrutaAcum,0)}  accent={V}/>
+                  <MiniKpi label="Rec. Líquida Acum." value={fmtBRL(ebitdaAcum,0)}   accent={OR}/>
+                  <MiniKpi label="Receita Acumulada"  value={fmtBRL(recBrutaAcum,0)} accent={V}/>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* ═══ PÁGINA 2 – B: TABELA FINANCEIRA ═══════════════════════════ */}
+          {/* ═══ P2-B: TABELA FINANCEIRA ════════════════════════════════ */}
           <div id="exec-fin-group1" style={{display:'flex',flexDirection:'column',gap:16}}>
             <SecTitle title="Desempenho Financeiro" num="4"/>
             <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
@@ -489,7 +572,7 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
             </div>
           </div>
 
-          {/* ═══ PÁGINA 2 – C: GRÁFICO RECEITA LÍQUIDA ═════════════════════ */}
+          {/* ═══ P2-C: GRÁFICO RECEITA LÍQUIDA ═════════════════════════ */}
           <div id="exec-chart1" style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
             <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Receita Líquida por Ano (R$)</p>
             <ResponsiveContainer width="100%" height={CHART_H}>
@@ -503,10 +586,9 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
             </ResponsiveContainer>
           </div>
 
-          {/* ═══ PÁGINA 3 — Receita Bruta + Fluxo + Conclusão + Banner ═════ */}
+          {/* ═══ P3: RECEITA BRUTA + FLUXO + CONCLUSÃO + BANNER ════════ */}
           <div id="exec-charts-group" style={{display:'flex',flexDirection:'column',gap:16}}>
 
-            {/* Gráfico — Receita Bruta × OPEX */}
             <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
               <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Evolução da Receita Bruta e OPEX (R$)</p>
               <ResponsiveContainer width="100%" height={CHART_H}>
@@ -522,7 +604,6 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
               </ResponsiveContainer>
             </div>
 
-            {/* Gráfico — Fluxo Acumulado */}
             <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
               <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Fluxo Acumulado (R$)</p>
               <ResponsiveContainer width="100%" height={CHART_H}>
@@ -536,7 +617,6 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
               </ResponsiveContainer>
             </div>
 
-            {/* Conclusão */}
             <div style={{background:'#f8fafc',borderRadius:10,padding:'14px 16px',border:'1px solid #e2e8f0',display:'flex',gap:12,alignItems:'flex-start'}}>
               <div style={{flexShrink:0,background:VL,borderRadius:'50%',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center'}}>
                 <IcoCheck/>
@@ -549,10 +629,8 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
               </div>
             </div>
 
-            {/* Banner final */}
             <Banner text={viavel_str}/>
 
-            {/* Rodapé da tela */}
             <div style={{textAlign:'center',borderTop:'1px solid #e2e8f0',paddingTop:10}}>
               <p style={{fontSize:10,color:'#94a3b8',margin:0}}>
                 <span style={{color:V,fontWeight:700}}>SOLFUS</span>{' '}
