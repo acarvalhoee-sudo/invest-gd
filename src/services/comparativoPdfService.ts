@@ -1,124 +1,187 @@
 /**
- * comparativoPdfService.ts — PDF Comparativo de Cenários
- * Gerado com jsPDF + jspdf-autotable (sem html2canvas).
- * Inclui: cabeçalho, matriz executiva, tabela completa,
- * gráficos de barra primitivos, parecer e conclusão.
+ * comparativoPdfService.ts — PDF Comparativo de Cenários v5
+ * Fix: Melhor Cenário — LEFT_RESERVED reduzido, Math.floor no kpiW,
+ *      cards garantidamente dentro das margens.
  */
-import jsPDF      from 'jspdf'
-import autoTable  from 'jspdf-autotable'
+import jsPDF     from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import type { Scenario } from '@/types/scenario'
 import type { Study }    from '@/types/study'
 
 /* ── Paleta ── */
 type RGB = [number, number, number]
-const VERDE:   RGB = [11,  94, 59]
-const VERDE_L: RGB = [232,245,238]
-const LARANJA: RGB = [234, 88,  12]
-const CINZA:   RGB = [100,116,139]
-const CINZA_L: RGB = [241,245,249]
-const BRANCO:  RGB = [255,255,255]
-const PRETO:   RGB = [15,  23, 42]
+const VERDE:    RGB = [11,  94,  59]
+const VERDE_L:  RGB = [232, 245, 238]
+const VERDE_D:  RGB = [7,   62,  39]
+const GRAFITE:  RGB = [51,  65,  85]
+const GRAFITE_L:RGB = [241, 245, 249]
+const CINZA_B:  RGB = [250, 250, 250]
+const CINZA_D:  RGB = [100, 100, 100]
+const BORDA:    RGB = [226, 232, 240]
+const BRANCO:   RGB = [255, 255, 255]
+const PRETO:    RGB = [18,   18,  18]
+const NEGATIVO: RGB = [185,  28,  28]
 
-const PW = 210, PH = 297, ML = 14, MR = 14
-const CW = PW - ML - MR
+const PW = 210, PH = 297
+const ML = 12,  MR = 12
+const CW = PW - ML - MR   // 186 mm
 
-type D = jsPDF
+type D = jsPDF & { lastAutoTable: { finalY: number } }
+const sf = (d: jsPDF, c: RGB) => d.setFillColor(c[0], c[1], c[2])
+const sd = (d: jsPDF, c: RGB) => d.setDrawColor(c[0], c[1], c[2])
+const st = (d: jsPDF, c: RGB) => d.setTextColor(c[0], c[1], c[2])
+const rgb3 = (c: RGB): [number, number, number] => [c[0], c[1], c[2]]
 
-const sf = (d: D, c: RGB) => d.setFillColor(c[0],c[1],c[2])
-const sd = (d: D, c: RGB) => d.setDrawColor(c[0],c[1],c[2])
-const st = (d: D, c: RGB) => d.setTextColor(c[0],c[1],c[2])
-
-const brl = (n: number) => 'R$ ' + n.toLocaleString('pt-BR',{maximumFractionDigits:0})
-const num = (n: number, d = 2) => n.toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d})
-
-function fmtV(v: number | null | undefined, type: string): string {
+const brl  = (n: number) => 'R$ ' + n.toLocaleString('pt-BR', { maximumFractionDigits: 0 })
+const num  = (n: number, d = 2) => n.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })
+const fmtV = (v: number | null | undefined, type: string): string => {
   if (v == null) return '—'
   if (type === 'brl')  return brl(v)
-  if (type === 'pct')  return num(v,2) + '%'
-  if (type === 'anos') return num(v,1) + ' a'
-  if (type === 'mwh')  return num(v,0) + ' MWh'
+  if (type === 'pct')  return num(v, 2) + '%'
+  if (type === 'anos') return num(v, 1) + ' a'
+  if (type === 'mwh')  return num(v, 0) + ' MWh'
   return String(v)
 }
 
-/* ── Horizontal bar chart (primitive rects) ── */
-function drawBarChart(
-  d: D,
-  y: number,
-  title: string,
-  items: { label: string; value: number | null }[],
-  fmtFn: (v: number) => string,
-  colorFn: (i: number, total: number) => RGB,
-  higherIsBetter = true,
-): number {
-  const H    = 7.5    // bar height
-  const GAP  = 4      // between bars
-  const LW   = 46     // label width
-  const BMAX = CW - LW - 30  // max bar width
-  const vals = items.map(i => i.value ?? 0)
-  const maxV = Math.max(...vals.map(Math.abs), 1)
-
-  // Title
-  d.setFont('helvetica','bold').setFontSize(9)
-  st(d, PRETO)
-  d.text(title.toUpperCase(), ML, y)
-  y += 5
-
-  // Underline
-  sf(d, VERDE); d.rect(ML, y-1, 28, 1, 'F'); y += 3
-
-  // Bars
-  items.forEach((item, i) => {
-    const bw   = Math.max((Math.abs(item.value ?? 0) / maxV) * BMAX, 1)
-    const col  = colorFn(i, items.length)
-    const isB  = higherIsBetter ? (item.value ?? -Infinity) === Math.max(...items.map(x => x.value ?? -Infinity)) :
-                                  (item.value ?? Infinity)  === Math.min(...items.map(x => x.value ?? Infinity))
-
-    // Label
-    d.setFont('helvetica', isB ? 'bold' : 'normal').setFontSize(8)
-    st(d, PRETO)
-    const lbl = item.label.length > 20 ? item.label.slice(0,18)+'…' : item.label
-    d.text(lbl, ML, y + H * 0.72)
-
-    // Bar
-    sf(d, col); sd(d, col)
-    d.rect(ML + LW, y, bw, H, 'F')
-
-    // Best indicator
-    if (isB) {
-      sf(d, VERDE_L); sd(d, VERDE)
-      d.roundedRect(ML + LW + bw + 1, y + 1, 3, H - 2, 1, 1, 'FD')
-    }
-
-    // Value label
-    d.setFont('helvetica','bold').setFontSize(7.5)
-    st(d, item.value != null && item.value < 0 ? [220,30,30] : VERDE)
-    d.text(item.value != null ? fmtFn(item.value) : '—', ML + LW + bw + 6, y + H * 0.72)
-
-    y += H + GAP
-  })
-  return y + 4
-}
-
-/* ── Page header ── */
-function pageHeader(d: D, study: Study, pageN: number) {
-  // Green stripe
-  sf(d, VERDE); d.rect(0,0,PW,14,'F')
-  d.setFont('helvetica','bold').setFontSize(10)
-  st(d, BRANCO)
-  d.text('ANÁLISE COMPARATIVA DE CENÁRIOS', ML, 9)
-  d.setFont('helvetica','normal').setFontSize(7)
-  d.text(study.ativo.nomeUsina || study.ativo.nomeEstudo || '', PW - MR, 9, {align:'right'})
-  d.setFontSize(7); st(d, [200,230,210])
-  d.text(`Pág. ${pageN}`, PW - MR, 6, {align:'right'})
-}
-
-/* ── Color functions ── */
-function scenarioColor(i: number, total: number): RGB {
-  const palette: RGB[] = [VERDE, LARANJA, [100,116,139],[59,130,246],[168,85,247],[20,184,166]]
+function scenarioColor(i: number): RGB {
+  const palette: RGB[] = [VERDE, GRAFITE, [30, 58, 95], [71, 85, 105], [7, 62, 39], [156, 163, 175]]
   return palette[i % palette.length]
 }
 
-/* ── MAIN EXPORT ── */
+/* ── Rodapé ── */
+function drawFooter(d: jsPDF, page: number, total: number) {
+  sf(d, VERDE); d.rect(0, PH - 9, PW, 9, 'F')
+  st(d, BRANCO); d.setFont('helvetica', 'bold').setFontSize(7)
+  d.text('SOLFUS ENGENHARIA E CONSERVAÇÃO DE ENERGIA', ML, PH - 3.5)
+  d.text(`Página ${page} de ${total}`, PW - MR, PH - 3.5, { align: 'right' })
+}
+
+/* ── Separador de seção ── */
+function sectionTitle(d: jsPDF, y: number, title: string): number {
+  sf(d, VERDE_L); sd(d, VERDE); d.setLineWidth(0.3)
+  d.rect(ML, y, CW, 8.5, 'FD')
+  sf(d, VERDE);   d.rect(ML, y, 3.5, 8.5, 'F')
+  sf(d, GRAFITE); d.rect(ML + 3.5, y, 2, 8.5, 'F')
+  st(d, VERDE_D); d.setFont('helvetica', 'bold').setFontSize(8.5)
+  d.text(title, ML + 10, y + 5.8)
+  return y + 8.5
+}
+
+/* ── Cabeçalho Página 1 ── */
+async function drawPage1Header(d: jsPDF, study: Study, nCenarios: number, dateStr: string) {
+  sf(d, VERDE); d.rect(0, 0, PW, 2.5, 'F')
+  sf(d, BRANCO); d.rect(0, 2.5, PW, 32, 'F')
+
+  let logoLoaded = false
+  try {
+    const resp = await fetch('/solfus-logo.png.png')
+    if (resp.ok) {
+      const blob = await resp.blob()
+      const logoData = await new Promise<string>(resolve => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result as string)
+        reader.readAsDataURL(blob)
+      })
+      d.addImage(logoData, 'PNG', ML, 5.5, 36, 19)
+      logoLoaded = true
+    }
+  } catch (_) { /* fallback */ }
+
+  if (!logoLoaded) {
+    sf(d, VERDE_L); sd(d, VERDE); d.setLineWidth(0.4)
+    d.rect(ML, 5.5, 36, 19, 'FD')
+    st(d, VERDE); d.setFont('helvetica', 'bold').setFontSize(11)
+    d.text('SOLFUS', ML + 18, 17, { align: 'center' })
+  }
+
+  sf(d, GRAFITE); d.rect(ML + 40, 7, 0.6, 15, 'F')
+  st(d, PRETO); d.setFont('helvetica', 'bold').setFontSize(13.5)
+  d.text('ANÁLISE COMPARATIVA DE CENÁRIOS', ML + 45, 14)
+  st(d, CINZA_D); d.setFont('helvetica', 'normal').setFontSize(7.5)
+  d.text(study.ativo.nomeUsina || study.ativo.nomeEstudo || '—', ML + 45, 20)
+  d.setFontSize(6.5)
+  d.text(
+    `${study.ativo.concessionaria || '—'}  ·  Emitido em ${dateStr}  ·  ${nCenarios} cenário${nCenarios > 1 ? 's' : ''}`,
+    ML + 45, 25.5,
+  )
+  sf(d, GRAFITE); d.rect(0, 33.5, PW, 0.8, 'F')
+  sf(d, VERDE);   d.rect(0, 34.3, PW, 0.4, 'F')
+}
+
+/* ── Cabeçalho Página 2 ── */
+function drawPage2Header(d: jsPDF, study: Study) {
+  sf(d, VERDE); d.rect(0, 0, PW, 2.5, 'F')
+  sf(d, BRANCO); d.rect(0, 2.5, PW, 17, 'F')
+  st(d, VERDE); d.setFont('helvetica', 'bold').setFontSize(8.5)
+  d.text('SOLFUS', ML, 13.5)
+  sf(d, GRAFITE); d.rect(ML + 19, 8, 0.6, 9, 'F')
+  st(d, PRETO); d.setFont('helvetica', 'bold').setFontSize(9)
+  d.text('ANÁLISE COMPARATIVA DE CENÁRIOS', ML + 23, 13.5)
+  st(d, CINZA_D); d.setFont('helvetica', 'normal').setFontSize(6.5)
+  d.text(study.ativo.nomeUsina || '—', PW - MR, 13.5, { align: 'right' })
+  sf(d, GRAFITE); d.rect(0, 19.5, PW, 0.8, 'F')
+  sf(d, VERDE);   d.rect(0, 20.3, PW, 0.3, 'F')
+}
+
+/* ── Gráfico de barras horizontal ── */
+function drawBarChart(
+  d: jsPDF, y: number,
+  title: string,
+  items: { label: string; value: number | null }[],
+  fmtFn: (v: number) => string,
+  colorFn: (i: number) => RGB,
+  higherIsBetter = true,
+): number {
+  const ROW_H  = 8.5
+  const GAP    = 2.5
+  const LBL_W  = 54
+  const BAR_MAX = CW - LBL_W - 40
+
+  const rawVals = items.map(i => i.value ?? 0)
+  const maxV    = Math.max(...rawVals.map(Math.abs), 1)
+
+  st(d, PRETO); d.setFont('helvetica', 'bold').setFontSize(8)
+  d.text(title.toUpperCase(), ML, y + 1.5)
+  y += 7
+  sf(d, VERDE); d.rect(ML, y - 2, CW, 0.5, 'F')
+  y += 1
+
+  items.forEach((item, i) => {
+    const bw  = Math.max((Math.abs(item.value ?? 0) / maxV) * BAR_MAX, 1.5)
+    const col = colorFn(i)
+    const isB = higherIsBetter
+      ? (item.value ?? -Infinity) === Math.max(...items.map(x => x.value ?? -Infinity))
+      : (item.value ?? Infinity)  === Math.min(...items.map(x => x.value ?? Infinity))
+
+    sf(d, i % 2 === 0 ? GRAFITE_L : BRANCO)
+    d.rect(ML, y, CW, ROW_H, 'F')
+
+    d.setFont('helvetica', isB ? 'bold' : 'normal').setFontSize(7.5)
+    st(d, PRETO)
+    const lbl = item.label.length > 26 ? item.label.slice(0, 24) + '…' : item.label
+    d.text(lbl, ML + 3, y + ROW_H * 0.70)
+
+    sf(d, col)
+    d.rect(ML + LBL_W, y + 1.5, bw, ROW_H - 3, 'F')
+
+    d.setFont('helvetica', 'bold').setFontSize(7)
+    const valColor: RGB = item.value != null && item.value < 0 ? NEGATIVO : VERDE_D
+    st(d, valColor)
+    d.text(
+      item.value != null ? fmtFn(item.value) : '—',
+      ML + LBL_W + bw + 4, y + ROW_H * 0.70,
+    )
+    if (isB) { st(d, GRAFITE); d.text('★', ML + LBL_W + bw + 24, y + ROW_H * 0.70) }
+    y += ROW_H + GAP
+  })
+
+  sf(d, BORDA); d.rect(ML, y, CW, 0.3, 'F')
+  return y + 5
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MAIN EXPORT
+══════════════════════════════════════════════════════════════════ */
 export async function exportComparativoPDF(
   study: Study,
   scenarios: Scenario[],
@@ -126,56 +189,36 @@ export async function exportComparativoPDF(
   const sc = scenarios.filter(s => s.results != null)
   if (sc.length === 0) { alert('Nenhum cenário com resultados para exportar.'); return }
 
-  const d   = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' })
-  const now = new Date()
+  const d       = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' }) as D
+  const now     = new Date()
   const dateStr = now.toLocaleDateString('pt-BR')
-  let y = 0
-  let page = 1
 
-  /* ══════════════════════════════════════
-     PAGE 1 — CABEÇALHO + MATRIZ + TABELA
-  ══════════════════════════════════════ */
+  const bestVPL = [...sc].sort((a, b) => b.results!.vpl - a.results!.vpl)[0]
+  const bestTIR = [...sc].filter(s => s.results!.tir != null)
+    .sort((a, b) => b.results!.tir! - a.results!.tir!)[0]
+  const bestPB  = [...sc].filter(s => s.results!.paybackSimples != null)
+    .sort((a, b) => a.results!.paybackSimples! - b.results!.paybackSimples!)[0]
 
-  // ── Full header block ─────────────────
-  sf(d, VERDE); d.rect(0,0,PW,42,'F')
+  /* ══ PÁGINA 1 ══════════════════════════════════════════════════ */
+  await drawPage1Header(d, study, sc.length, dateStr)
+  let y = 38
 
-  // Logo placeholder (white box)
-  sf(d, BRANCO); d.rect(ML,5,28,22,'F')
-  d.setFont('helvetica','bold').setFontSize(11); st(d,[11,94,59])
-  d.text('SOLFUS', ML+14, 18, {align:'center'})
-  d.setFont('helvetica','normal').setFontSize(6.5); st(d,[11,94,59])
-  d.text('ENERGIA', ML+14, 22, {align:'center'})
+  /* Matriz executiva */
+  y = sectionTitle(d, y, 'MATRIZ EXECUTIVA') + 5
 
-  // Title area
-  d.setFont('helvetica','bold').setFontSize(16); st(d, BRANCO)
-  d.text('ANÁLISE COMPARATIVA', ML+34, 14)
-  d.text('DE CENÁRIOS', ML+34, 21)
-  d.setFont('helvetica','normal').setFontSize(8); st(d,[200,230,210])
-  d.text(study.ativo.nomeUsina || study.ativo.nomeEstudo || 'Estudo sem nome', ML+34, 28)
-  d.text(`Emitido em: ${dateStr}  |  ${sc.length} cenário${sc.length>1?'s':''} analisado${sc.length>1?'s':''}`, ML+34, 33)
-
-  // Orange accent bar
-  sf(d, LARANJA); d.rect(0,42,PW,2,'F')
-  y = 50
-
-  // ── Matriz executiva ──────────────────
-  d.setFont('helvetica','bold').setFontSize(10); st(d, PRETO)
-  d.text('MATRIZ EXECUTIVA', ML, y); y += 5
-  sf(d, VERDE); d.rect(ML, y-1, 36, 1,'F'); y += 4
-
-  const bestVPL = [...sc].sort((a,b)=>(b.results!.vpl)-(a.results!.vpl))[0]
-  const bestTIR = [...sc].filter(s=>s.results!.tir!=null).sort((a,b)=>b.results!.tir!-a.results!.tir!)[0]
-  const bestPB  = [...sc].filter(s=>s.results!.paybackSimples!=null).sort((a,b)=>a.results!.paybackSimples!-b.results!.paybackSimples!)[0]
-
-  const matrixHead = [['Cenário','VPL (R$)','TIR (%)','Payback (anos)','Rec. Líq. Acumulada (R$)']]
+  const matrixHead = [['Cenário', 'VPL (R$)', 'TIR (%)', 'Payback (anos)', 'Rec. Líq. Acum. (R$)']]
   const matrixRows = sc.map(s => {
-    const r = s.results!
+    const r      = s.results!
     const isBest = s.id === bestVPL?.id
     return [
-      { content: s.name, styles: isBest ? {fillColor:[232,245,238] as [number,number,number], fontStyle:'bold' as const, textColor:[11,94,59] as [number,number,number]} : {} },
-      { content: brl(r.vpl), styles: isBest ? {textColor:[11,94,59] as [number,number,number], fontStyle:'bold' as const} : {} },
-      { content: r.tir!=null ? num(r.tir,2)+'%' : '—', styles: s.id===bestTIR?.id ? {textColor:[11,94,59] as [number,number,number], fontStyle:'bold' as const} : {} },
-      { content: r.paybackSimples!=null ? num(r.paybackSimples,1)+' a' : '—', styles: s.id===bestPB?.id ? {textColor:[11,94,59] as [number,number,number], fontStyle:'bold' as const} : {} },
+      { content: s.name,
+        styles: isBest ? { fillColor: rgb3(VERDE_L), fontStyle: 'bold' as const, textColor: rgb3(VERDE_D) } : {} },
+      { content: brl(r.vpl),
+        styles: isBest ? { textColor: rgb3(VERDE_D), fontStyle: 'bold' as const } : {} },
+      { content: r.tir != null ? num(r.tir, 2) + '%' : '—',
+        styles: s.id === bestTIR?.id ? { textColor: rgb3(VERDE_D), fontStyle: 'bold' as const } : {} },
+      { content: r.paybackSimples != null ? num(r.paybackSimples, 1) + ' a' : '—',
+        styles: s.id === bestPB?.id ? { textColor: rgb3(VERDE_D), fontStyle: 'bold' as const } : {} },
       { content: brl(r.ebitdaAcumulado), styles: {} },
     ]
   })
@@ -184,165 +227,215 @@ export async function exportComparativoPDF(
     startY: y,
     head: matrixHead,
     body: matrixRows,
-    theme:'grid',
-    headStyles:{ fillColor:VERDE, textColor:BRANCO, fontStyle:'bold', fontSize:8, halign:'center' },
-    bodyStyles:{ fontSize:8, halign:'center' },
-    columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
-    margin:{ left:ML, right:MR },
+    theme: 'plain',
+    headStyles: {
+      fillColor: rgb3(VERDE), textColor: rgb3(BRANCO),
+      fontStyle: 'bold', fontSize: 8, halign: 'center', cellPadding: 3.5,
+    },
+    bodyStyles: { fontSize: 8, halign: 'center', cellPadding: 3.5 },
+    columnStyles: { 0: { halign: 'left', fontStyle: 'bold', cellWidth: 48 } },
+    alternateRowStyles: { fillColor: rgb3(GRAFITE_L) },
+    margin: { left: ML, right: MR },
     tableWidth: CW,
   })
-  y = (d as any).lastAutoTable.finalY + 8
+  y = d.lastAutoTable.finalY + 7
 
-  // ── Tabela completa de indicadores ───
-  d.setFont('helvetica','bold').setFontSize(10); st(d, PRETO)
-  d.text('COMPARATIVO DE INDICADORES', ML, y); y += 5
-  sf(d, LARANJA); d.rect(ML, y-1, 46, 1,'F'); y += 3
+  /* ── Melhor cenário identificado ──
+   *
+   * Layout: [acento esq 5.5mm] [nome cenário em ~56mm] [4 KPI cards]
+   *
+   * Cálculo das larguras:
+   *   LEFT_RESERVED = 58mm  (5.5mm acento + 52.5mm nome)
+   *   CARD_GAP      = 2mm
+   *   kpiW          = floor((CW - 58 - 2*3) / 4) = floor(121/4) = 30mm
+   *   kpiX0         = ML + 58 = 70mm
+   *   Última borda  = 70 + 4*30 + 3*2 = 196mm  (< 198mm = PW-MR)  ✓
+   */
+  if (bestVPL) {
+    const BOX_H        = 26
+    const LEFT_RESERVED = 58                              // mm para nome
+    const CARD_GAP      = 2                               // gap entre cards
+    const N_CARDS       = 4
+    const kpiW          = Math.floor((CW - LEFT_RESERVED - CARD_GAP * (N_CARDS - 1)) / N_CARDS)  // 30mm
+    const kpiX0         = ML + LEFT_RESERVED              // 70mm
 
-  const indHead = [['Indicador', ...sc.map(s=>s.name)]]
-  type CellDef = { content: string; styles?: Record<string, unknown> }
-  const metrics: { label:string; get:(r:NonNullable<typeof sc[0]['results']>)=>number|null; fmt:string; higher:boolean }[] = [
-    { label:'VPL (R$)',                  get:r=>r.vpl,                fmt:'brl',  higher:true  },
-    { label:'TIR (%)',                   get:r=>r.tir,                fmt:'pct',  higher:true  },
-    { label:'Payback Simples (anos)',    get:r=>r.paybackSimples,     fmt:'anos', higher:false },
-    { label:'Payback Descontado (anos)', get:r=>r.paybackDescontado,  fmt:'anos', higher:false },
-    { label:'CAPEX (R$)',                get:r=>r.capex,              fmt:'brl',  higher:false },
-    { label:'Receita Líq. Acumulada',   get:r=>r.receitaAcumulada,   fmt:'brl',  higher:true  },
-    { label:'EBITDA Total (R$)',         get:r=>r.ebitdaAcumulado,    fmt:'brl',  higher:true  },
-    { label:'Geração Anual (MWh)',       get:r=>r.geracaoAnual,       fmt:'mwh',  higher:true  },
+    /* Moldura externa */
+    sf(d, VERDE_L); sd(d, VERDE); d.setLineWidth(0.4)
+    d.roundedRect(ML, y, CW, BOX_H, 2, 2, 'FD')
+
+    /* Acentos verticais à esquerda */
+    sf(d, VERDE);   d.rect(ML, y, 3.5, BOX_H, 'F')
+    sf(d, GRAFITE); d.rect(ML + 3.5, y, 2, BOX_H, 'F')
+
+    /* Título + nome do cenário */
+    d.setFont('helvetica', 'bold').setFontSize(6.5); st(d, CINZA_D)
+    d.text('MELHOR CENÁRIO IDENTIFICADO', ML + 9, y + 7)
+    d.setFont('helvetica', 'bold').setFontSize(10.5); st(d, VERDE_D)
+    const nomeText = bestVPL.name.length > 22 ? bestVPL.name.slice(0, 20) + '…' : bestVPL.name
+    d.text(nomeText, ML + 9, y + 18)
+
+    /* 4 KPI cards — alinhados à direita dentro da moldura */
+    const kpiDefs = [
+      { l: 'VPL',       v: brl(bestVPL.results!.vpl) },
+      { l: 'TIR',       v: bestVPL.results!.tir != null ? num(bestVPL.results!.tir, 2) + '% a.a.' : '—' },
+      { l: 'Payback',   v: bestVPL.results!.paybackSimples != null ? num(bestVPL.results!.paybackSimples, 1) + ' a' : '—' },
+      { l: 'Rec.L.Ac.', v: brl(bestVPL.results!.ebitdaAcumulado) },
+    ]
+
+    kpiDefs.forEach(({ l, v }, i) => {
+      const bx = kpiX0 + i * (kpiW + CARD_GAP)
+      sf(d, BRANCO); sd(d, BORDA); d.setLineWidth(0.25)
+      d.roundedRect(bx, y + 3.5, kpiW, BOX_H - 7, 1.5, 1.5, 'FD')
+      d.setFont('helvetica', 'normal').setFontSize(5.5); st(d, CINZA_D)
+      d.text(l.toUpperCase(), bx + kpiW / 2, y + 10, { align: 'center' })
+      d.setFont('helvetica', 'bold').setFontSize(6.5); st(d, VERDE_D)
+      // Truncar valor longo se necessário
+      const vStr = v.length > 14 ? v.slice(0, 13) + '…' : v
+      d.text(vStr, bx + kpiW / 2, y + 18.5, { align: 'center' })
+    })
+
+    y += BOX_H + 7
+  }
+
+  /* Tabela comparativa completa */
+  y = sectionTitle(d, y, 'COMPARATIVO DE INDICADORES') + 5
+
+  const metrics: {
+    label: string
+    get: (r: NonNullable<typeof sc[0]['results']>) => number | null
+    fmt: string
+    higher: boolean
+  }[] = [
+    { label: 'VPL (R$)',                   get: r => r.vpl,               fmt: 'brl',  higher: true  },
+    { label: 'TIR (%)',                    get: r => r.tir,               fmt: 'pct',  higher: true  },
+    { label: 'Payback Simples (anos)',     get: r => r.paybackSimples,    fmt: 'anos', higher: false },
+    { label: 'Payback Descontado (anos)', get: r => r.paybackDescontado, fmt: 'anos', higher: false },
+    { label: 'CAPEX (R$)',                 get: r => r.capex,             fmt: 'brl',  higher: false },
+    { label: 'Rec. Líq. Acumulada (R$)',  get: r => r.ebitdaAcumulado,   fmt: 'brl',  higher: true  },
+    { label: 'Rec. Bruta Acumulada (R$)', get: r => r.receitaAcumulada,  fmt: 'brl',  higher: true  },
+    { label: 'Geração Anual (MWh)',        get: r => r.geracaoAnual,      fmt: 'mwh',  higher: true  },
   ]
+
+  type CellDef = { content: string; styles?: Record<string, unknown> }
   const indBody: CellDef[][] = metrics.map(m => {
-    const vals = sc.map(s=>m.get(s.results!))
+    const vals = sc.map(s => m.get(s.results!))
     const best = m.higher
-      ? Math.max(...vals.filter((v):v is number=>v!=null))
-      : Math.min(...vals.filter((v):v is number=>v!=null))
+      ? Math.max(...vals.filter((v): v is number => v != null))
+      : Math.min(...vals.filter((v): v is number => v != null))
     return [
-      { content: m.label, styles:{ fontStyle:'bold', halign:'left' } },
+      { content: m.label, styles: { halign: 'left' } },
       ...sc.map(s => {
-        const v = m.get(s.results!)
+        const v   = m.get(s.results!)
         const isB = v != null && v === best
-        return { content: fmtV(v, m.fmt), styles: isB ? { textColor:[11,94,59], fontStyle:'bold', fillColor:[232,245,238] } : { halign:'center' } }
+        return {
+          content: fmtV(v, m.fmt),
+          styles: isB
+            ? { textColor: rgb3(VERDE_D), fontStyle: 'bold' as const, fillColor: rgb3(VERDE_L) }
+            : { halign: 'center' },
+        }
       }),
     ]
   })
 
   autoTable(d, {
     startY: y,
-    head: indHead,
+    head: [['Indicador', ...sc.map(s => s.name)]],
     body: indBody,
-    theme:'striped',
-    headStyles:{ fillColor:[30,41,59], textColor:BRANCO, fontStyle:'bold', fontSize:7.5, halign:'center' },
-    bodyStyles:{ fontSize:7.5, halign:'center' },
-    columnStyles:{ 0:{ halign:'left', fontStyle:'bold', cellWidth:54 } },
-    alternateRowStyles:{ fillColor:[248,250,252] },
-    margin:{ left:ML, right:MR },
+    theme: 'plain',
+    headStyles: {
+      fillColor: rgb3(GRAFITE), textColor: rgb3(BRANCO),
+      fontStyle: 'bold', fontSize: 7.5, halign: 'center', cellPadding: 3.5,
+    },
+    bodyStyles: { fontSize: 7.5, halign: 'center', cellPadding: 3.5 },
+    columnStyles: { 0: { halign: 'left', fontStyle: 'bold', cellWidth: 55 } },
+    alternateRowStyles: { fillColor: rgb3(CINZA_B) },
+    margin: { left: ML, right: MR },
     tableWidth: CW,
   })
-  y = (d as any).lastAutoTable.finalY + 6
 
-  /* ══════════════════════════════════════
-     PAGE 2 — GRÁFICOS
-  ══════════════════════════════════════ */
-  d.addPage(); page++
-  pageHeader(d, study, page); y = 18
+  drawFooter(d, 1, 2)
 
-  const CHARTS: { title:string; get:(r:NonNullable<typeof sc[0]['results']>)=>number|null; fmt:(v:number)=>string; higher:boolean }[] = [
-    { title:'VPL por Cenário (R$)',                get:r=>r.vpl,              fmt:v=>brl(v),         higher:true  },
-    { title:'TIR por Cenário (%)',                  get:r=>r.tir,              fmt:v=>num(v,2)+'%',   higher:true  },
-    { title:'Payback Simples (anos)',               get:r=>r.paybackSimples,   fmt:v=>num(v,1)+' a',  higher:false },
-    { title:'Receita Líq. Acumulada (R$)',          get:r=>r.ebitdaAcumulado,  fmt:v=>brl(v),         higher:true  },
-    { title:'Receita Bruta Acumulada (R$)',         get:r=>r.receitaAcumulada, fmt:v=>brl(v),         higher:true  },
+  /* ══ PÁGINA 2 ══════════════════════════════════════════════════ */
+  d.addPage()
+  drawPage2Header(d, study)
+  y = 25
+
+  y = sectionTitle(d, y, 'GRÁFICOS COMPARATIVOS') + 6
+
+  const CHARTS = [
+    {
+      title: 'VPL POR CENÁRIO (R$)',
+      get:   (r: NonNullable<typeof sc[0]['results']>) => r.vpl,
+      fmt:   (v: number) => brl(v),
+      higher: true,
+    },
+    {
+      title: 'TIR POR CENÁRIO (%)',
+      get:   (r: NonNullable<typeof sc[0]['results']>) => r.tir,
+      fmt:   (v: number) => num(v, 2) + '%',
+      higher: true,
+    },
+    {
+      title: 'PAYBACK SIMPLES (ANOS)',
+      get:   (r: NonNullable<typeof sc[0]['results']>) => r.paybackSimples,
+      fmt:   (v: number) => num(v, 1) + ' a',
+      higher: false,
+    },
+    {
+      title: 'RECEITA LÍQUIDA ACUMULADA (R$)',
+      get:   (r: NonNullable<typeof sc[0]['results']>) => r.ebitdaAcumulado,
+      fmt:   (v: number) => brl(v),
+      higher: true,
+    },
   ]
 
   for (const chart of CHARTS) {
-    const items = sc.map(s => ({ label:s.name, value:chart.get(s.results!) }))
-    if (y + sc.length * 12 + 14 > PH - 20) {
-      d.addPage(); page++
-      pageHeader(d, study, page); y = 18
-    }
-    y = drawBarChart(d, y, chart.title, items, chart.fmt, scenarioColor, chart.higher)
-    y += 2
-    // Separator line
-    sd(d, CINZA_L); d.setLineWidth(0.2); d.line(ML, y, PW-MR, y); y += 5
+    y = drawBarChart(
+      d, y, chart.title,
+      sc.map(s => ({ label: s.name, value: chart.get(s.results!) })),
+      chart.fmt, scenarioColor, chart.higher,
+    )
   }
 
-  /* ══════════════════════════════════════
-     PAGE 3 — PARECER + CONCLUSÃO
-  ══════════════════════════════════════ */
-  d.addPage(); page++
-  pageHeader(d, study, page); y = 20
+  /* Parecer executivo */
+  y = sectionTitle(d, y, 'PARECER EXECUTIVO') + 5
 
-  // ── Parecer executivo ─────────────────
-  sf(d, VERDE); d.rect(ML, y, 3, 20,'F')
-  d.setFont('helvetica','bold').setFontSize(10); st(d, VERDE)
-  d.text('PARECER EXECUTIVO', ML+6, y+7)
-  d.setFont('helvetica','normal').setFontSize(9); st(d, PRETO)
-
-  // Auto-generate parecer text
   const parecerLines: string[] = []
   if (bestVPL) {
-    parecerLines.push(`O cenário "${bestVPL.name}" apresentou o maior retorno financeiro, com VPL de ${brl(bestVPL.results!.vpl)}${bestVPL.results!.tir!=null?' e TIR de '+num(bestVPL.results!.tir,2)+'% a.a.':''}.`)
+    parecerLines.push(
+      `O cenário "${bestVPL.name}" apresentou o maior retorno financeiro, com VPL de ${brl(bestVPL.results!.vpl)}` +
+      (bestVPL.results!.tir != null ? ` e TIR de ${num(bestVPL.results!.tir, 2)}% a.a.` : '') + '.',
+    )
   }
   if (bestTIR && bestTIR.id !== bestVPL?.id) {
-    parecerLines.push(`A maior TIR foi identificada no cenário "${bestTIR.name}", com ${num(bestTIR.results!.tir!,2)}% a.a.`)
+    parecerLines.push(`A maior TIR foi identificada em "${bestTIR.name}", com ${num(bestTIR.results!.tir!, 2)}% a.a.`)
   }
   if (bestPB) {
-    parecerLines.push(`O menor prazo de retorno foi observado em "${bestPB.name}", com payback de ${num(bestPB.results!.paybackSimples!,1)} anos.`)
+    parecerLines.push(
+      `O menor prazo de retorno foi observado em "${bestPB.name}", com payback de ${num(bestPB.results!.paybackSimples!, 1)} anos.`,
+    )
   }
   if (sc.length > 1) {
-    const worst = [...sc].sort((a,b)=>a.results!.vpl-b.results!.vpl)[0]
-    parecerLines.push(`O cenário "${worst.name}" apresentou o menor VPL (${brl(worst.results!.vpl)}), indicando maior conservadorismo nas premissas adotadas.`)
+    const worst = [...sc].sort((a, b) => a.results!.vpl - b.results!.vpl)[0]
+    parecerLines.push(
+      `O cenário "${worst.name}" apresentou o menor VPL (${brl(worst.results!.vpl)}), indicando premissas mais conservadoras.`,
+    )
   }
-  parecerLines.push('Os resultados acima consideram as premissas individuais de cada cenário. Recomenda-se análise complementar de sensibilidade antes da decisão de investimento.')
+  parecerLines.push('Recomenda-se análise complementar de sensibilidade antes da decisão de investimento.')
 
-  const parecerText = parecerLines.join(' ')
-  const split = d.splitTextToSize(parecerText, CW - 12)
-  d.text(split, ML+6, y+14)
-  y += 14 + split.length * 4.5 + 8
+  const parecerH = 26
+  sf(d, VERDE_L); sd(d, VERDE); d.setLineWidth(0.35)
+  d.roundedRect(ML, y, CW, parecerH, 2, 2, 'FD')
+  sf(d, VERDE);   d.rect(ML, y, 3.5, parecerH, 'F')
+  sf(d, GRAFITE); d.rect(ML + 3.5, y, 2, parecerH, 'F')
+  st(d, PRETO); d.setFont('helvetica', 'normal').setFontSize(7.5)
+  const split = d.splitTextToSize(parecerLines.join(' '), CW - 14)
+  d.text(split, ML + 9, y + 7)
 
-  // ── Conclusão ─────────────────────────
-  const best = bestVPL
-  if (best) {
-    sf(d, VERDE_L); sd(d, VERDE); d.setLineWidth(0.5)
-    d.roundedRect(ML, y, CW, 44, 3, 3, 'FD')
+  drawFooter(d, 2, 2)
 
-    // Trophy badge
-    sf(d, VERDE); d.circle(ML+13, y+12, 8, 'F')
-    d.setFont('helvetica','bold').setFontSize(14); st(d, BRANCO)
-    d.text('★', ML+13, y+15.5, {align:'center'})
-
-    d.setFont('helvetica','bold').setFontSize(11); st(d, VERDE)
-    d.text('MELHOR CENÁRIO IDENTIFICADO', ML+26, y+9)
-    d.setFont('helvetica','bold').setFontSize(16); st(d, [15,41,23])
-    d.text(best.name, ML+26, y+18)
-
-    // KPIs
-    const kpis = [
-      ['VPL',     brl(best.results!.vpl)],
-      ['TIR',     best.results!.tir!=null ? num(best.results!.tir,2)+'% a.a.' : '—'],
-      ['Payback', best.results!.paybackSimples!=null ? num(best.results!.paybackSimples,1)+' anos' : '—'],
-      ['EBITDA Total', brl(best.results!.ebitdaAcumulado)],
-    ]
-    kpis.forEach(([lbl,val], i) => {
-      const bx = ML + 2 + i * (CW/4)
-      sf(d, BRANCO); d.roundedRect(bx, y+24, CW/4-4, 14, 2, 2, 'F')
-      d.setFont('helvetica','normal').setFontSize(6.5); st(d, CINZA)
-      d.text(lbl.toUpperCase(), bx+(CW/4-4)/2, y+30, {align:'center'})
-      d.setFont('helvetica','bold').setFontSize(8.5); st(d, VERDE)
-      d.text(val, bx+(CW/4-4)/2, y+36, {align:'center'})
-    })
-    y += 52
-  }
-
-  // ── Rodapé final ──────────────────────
-  sf(d, VERDE); d.rect(0, PH-12, PW, 12, 'F')
-  d.setFont('helvetica','bold').setFontSize(8); st(d, BRANCO)
-  d.text('SOLFUS Engenharia e Conservação de Energia', PW/2, PH-5.5, {align:'center'})
-  d.setFont('helvetica','normal').setFontSize(6.5); st(d,[200,230,210])
-  d.text(`Emitido em ${dateStr} — INVEST GD`, PW/2, PH-2, {align:'center'})
-
-  // ── Save ──────────────────────────────
+  /* ── Save ── */
   const safe = (study.ativo.nomeUsina || study.ativo.nomeEstudo || 'USINA')
-    .toUpperCase().replace(/[^A-Z0-9]/g,'-').replace(/-+/g,'-')
-  const date = now.toISOString().slice(0,10)
-  d.save(`COMPARATIVO_${safe}_${date}.pdf`)
+    .toUpperCase().replace(/[^A-Z0-9]/g, '-').replace(/-+/g, '-')
+  d.save(`COMPARATIVO_${safe}_${now.toISOString().slice(0, 10)}.pdf`)
 }

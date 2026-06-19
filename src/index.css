@@ -83,3 +83,51 @@
 ::-webkit-scrollbar-track      { background: transparent; }
 ::-webkit-scrollbar-thumb      { background: hsl(var(--border)); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover{ background: hsl(var(--muted-foreground)); }
+
+/* ── Impressão / Exportação PDF via window.print() ── */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  /* Oculta toda a shell do app */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Mostra somente o relatório executivo */
+  #executive-report-export,
+  #executive-report-export * {
+    visibility: visible !important;
+  }
+
+  #executive-report-export {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif !important;
+  }
+
+  /* Controle de quebra de página */
+  .pdf-avoid,
+  .pdf-section {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .pdf-before {
+    break-before: page !important;
+    page-break-before: always !important;
+  }
+
+  /* Garante que SVG do Recharts seja visível */
+  #executive-report-export .recharts-wrapper,
+  #executive-report-export .recharts-surface {
+    overflow: visible !important;
+  }
+}

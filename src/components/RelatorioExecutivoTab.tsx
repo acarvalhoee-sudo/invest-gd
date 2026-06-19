@@ -1,5 +1,9 @@
 /**
- * RelatorioExecutivoTab.tsx — v10
+ * RelatorioExecutivoTab.tsx — v12
+ * Paginação:
+ *   P1: Cabeçalho + Resumo Executivo + Premissas (3 cards)
+ *   P2: Investimento + Destaques + Tabela Financeira + Gráfico Receita Líquida
+ *   P3: Receita Bruta + Fluxo Acumulado + Conclusão + Banner
  */
 import { useMemo, useState, useCallback } from 'react'
 import {
@@ -130,44 +134,6 @@ function ChartTip({active,payload,label}:{active?:boolean;payload?:{name:string;
 
 interface Props { study: Study; res: ResultadosFinanceiros }
 
-
-async function exportPDF(nomeUsina: string) {
-  const el = document.getElementById('executive-report-export')
-  if (!el) { window.print(); return }
-  try {
-    const html2canvas = (await import('html2canvas')).default
-    const { jsPDF }   = await import('jspdf')
-    const canvas = await html2canvas(el, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-    })
-    const imgData  = canvas.toDataURL('image/png')
-    const pdfW     = 297  // A4 landscape mm
-    const pdfH     = 210
-    const ratio    = canvas.height / canvas.width
-    const imgH     = pdfW * ratio
-    const pdf      = new jsPDF({ orientation: imgH > pdfH ? 'portrait' : 'landscape', unit: 'mm', format: 'a4' })
-    const pw       = pdf.internal.pageSize.getWidth()
-    const ph       = pdf.internal.pageSize.getHeight()
-    let   yOffset  = 0
-    const imgWidth = pw
-    const imgHeightOnPage = pw * (canvas.height / canvas.width)
-    while (yOffset < imgHeightOnPage) {
-      if (yOffset > 0) pdf.addPage()
-      pdf.addImage(imgData, 'PNG', 0, -yOffset, imgWidth, imgHeightOnPage)
-      yOffset += ph
-    }
-    const safe = (nomeUsina || 'USINA').toUpperCase().replace(/[^A-Z0-9]/g, '-').replace(/-+/g, '-')
-    const date = new Date().toISOString().slice(0, 10)
-    pdf.save(`INVEST-GD_${safe}_${date}.pdf`)
-  } catch (e) {
-    console.error('PDF error', e)
-    window.print()
-  }
-}
-
 export default function RelatorioExecutivoTab({ study, res }: Props) {
   const at  = study.ativo
   const tar = study.tarifas
@@ -234,7 +200,6 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
     ['IPCA (% a.a.)',                 fmtNum(pf.inflacao, 2) + '%'],
     ['Vida Útil (anos)',         String(pf.vidaUtil)],
   ]
-  // Valores calculados do OPEX para o memorial (ano cheio = referência)
   const opexAnualOperacao  = cap.total * (op.operacao   / 100)
   const opexAnualManutencao= cap.total * (op.manutencao / 100)
   const opexAnualSeguro    = cap.total * (op.seguro     / 100)
@@ -261,257 +226,344 @@ export default function RelatorioExecutivoTab({ study, res }: Props) {
 
   const CHART_H = 230
 
+  /* ══════════════════════════════════════════════════════════════════
+   * handleExport — 3 páginas controladas por grupo de IDs
+   *
+   *  P1: exec-header | exec-resumo | exec-prem-group1
+   *  P2: exec-prem-group2 | exec-fin-group1 | exec-chart1
+   *  P3: exec-charts-group  (Receita Bruta + Fluxo + Conclusão + Banner)
+   * ════════════════════════════════════════════════════════════════ */
   const [exporting, setExporting] = useState(false)
   const handleExport = useCallback(async () => {
     setExporting(true)
-    await exportPDF(at.nomeUsina || at.nomeEstudo || 'USINA')
-    setExporting(false)
-  }, [at])
+    try {
+      const html2canvas = (await import('html2canvas')).default
+      const { default: jsPDF } = await import('jspdf')
+
+      const SCALE  = 1.8
+      const GAP_PX = Math.round(24 * SCALE)
+      const BG     = '#f8fafc'
+      const MARGIN = 8
+
+      const container = document.getElementById('executive-report-export')
+      if (!container) throw new Error('Container não encontrado')
+      const ww = container.scrollWidth
+
+      const captureGroup = async (ids: string[]): Promise<HTMLCanvasElement> => {
+        const canvases: HTMLCanvasElement[] = []
+        for (const id of ids) {
+          const el = document.getElementById(id)
+          if (!el) { console.warn(`#${id} não encontrado`); continue }
+          const c = await html2canvas(el, {
+            scale: SCALE, useCORS: true, allowTaint: false,
+            backgroundColor: BG, logging: false,
+            scrollX: 0, scrollY: 0, windowWidth: ww,
+          })
+          canvases.push(c)
+        }
+        if (canvases.length === 0) throw new Error(`Sem elementos: ${ids.join(', ')}`)
+        if (canvases.length === 1) return canvases[0]
+        const w = canvases[0].width
+        const h = canvases.reduce((s, c, i) => s + c.height + (i > 0 ? GAP_PX : 0), 0)
+        const out = document.createElement('canvas')
+        out.width = w; out.height = h
+        const ctx = out.getContext('2d')!
+        ctx.fillStyle = BG; ctx.fillRect(0, 0, w, h)
+        let y = 0
+        for (let i = 0; i < canvases.length; i++) {
+          if (i > 0) y += GAP_PX
+          ctx.drawImage(canvases[i], 0, y); y += canvases[i].height
+        }
+        return out
+      }
+
+      const pdf      = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
+      const pdfW     = pdf.internal.pageSize.getWidth()
+      const pdfH     = pdf.internal.pageSize.getHeight()
+      const contentW = pdfW - 2 * MARGIN
+      const contentH = pdfH - 2 * MARGIN
+
+      const addToPDF = (canvas: HTMLCanvasElement, isFirstGroup: boolean) => {
+        const mmPerPx   = contentW / canvas.width
+        const imgH_mm   = canvas.height * mmPerPx
+        const sliceH_px = contentH / mmPerPx
+        const pages     = Math.ceil(imgH_mm / contentH)
+        for (let p = 0; p < pages; p++) {
+          if (!(isFirstGroup && p === 0)) pdf.addPage()
+          const srcY = p * sliceH_px
+          const srcH = Math.min(sliceH_px, canvas.height - srcY)
+          const slice = document.createElement('canvas')
+          slice.width = canvas.width; slice.height = Math.ceil(srcH)
+          const ctx = slice.getContext('2d')!
+          ctx.fillStyle = BG; ctx.fillRect(0, 0, slice.width, slice.height)
+          ctx.drawImage(canvas, 0, -srcY)
+          pdf.addImage(slice.toDataURL('image/jpeg', 0.92), 'JPEG', MARGIN, MARGIN, contentW, srcH * mmPerPx)
+        }
+      }
+
+      // Página 1
+      const c1 = await captureGroup(['exec-header', 'exec-resumo', 'exec-prem-group1'])
+      addToPDF(c1, true)
+
+      // Página 2: Investimento + Destaques + Tabela + Gráfico Receita Líquida
+      const c2 = await captureGroup(['exec-prem-group2', 'exec-fin-group1', 'exec-chart1'])
+      addToPDF(c2, false)
+
+      // Página 3: Receita Bruta + Fluxo Acumulado + Conclusão + Banner
+      const c3 = await captureGroup(['exec-charts-group'])
+      addToPDF(c3, false)
+
+      const nome = (study.ativo.nomeUsina || 'USINA').replace(/[^a-zA-Z0-9]/g, '-').toUpperCase()
+      pdf.save(`INVEST-GD_${nome}_${new Date().toISOString().slice(0, 10)}.pdf`)
+    } catch (e) {
+      console.error('PDF error:', e)
+      alert('Erro ao gerar PDF. Verifique o console.')
+    } finally {
+      setExporting(false)
+    }
+  }, [study])
 
   return (
-    <div style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif", display:'flex', flexDirection:'column', gap:0}}>
-      {/* Export button — outside exported area */}
-      <div style={{display:'flex', justifyContent:'flex-end', marginBottom:12}}>
-        <Button
-          onClick={handleExport}
-          disabled={exporting}
-          style={{gap:6, background:'#0B5E3B', color:'white', border:'none'}}
-        >
+    <div style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif",display:'flex',flexDirection:'column',gap:0}}>
+
+      {/* Botão — fora do container de captura */}
+      <div style={{display:'flex',justifyContent:'flex-end',marginBottom:12}}>
+        <Button onClick={handleExport} disabled={exporting}
+          style={{gap:6,background:'#0B5E3B',color:'white',border:'none'}}>
           {exporting
-            ? <><Loader2 className="w-4 h-4 animate-spin" /> Gerando PDF...</>
-            : <><Download className="w-4 h-4" /> Exportar PDF</>
-          }
+            ? <><Loader2 className="w-4 h-4 animate-spin"/> Gerando PDF...</>
+            : <><Download className="w-4 h-4"/> Exportar PDF</>}
         </Button>
       </div>
-      {/* Exported area */}
+
+      {/* ── Área de captura ── */}
       <div id="executive-report-export" style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif"}}>
-        {/* CSS for PDF page-break protection */}
-        <style>{`
-          #executive-report-export .pdf-section { page-break-inside: avoid; break-inside: avoid; }
-          #executive-report-export .pdf-avoid   { page-break-inside: avoid; break-inside: avoid; }
-          #executive-report-export .pdf-before  { page-break-before: always; break-before: page; }
-        `}</style>
         <div style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif",color:'#1e293b',display:'flex',flexDirection:'column',gap:24}}>
 
-      {/* CABEÇALHO */}
-      <div style={{background:'white',borderRadius:12,border:'1px solid #e2e8f0',boxShadow:'0 1px 8px rgba(0,0,0,.06)',display:'flex',alignItems:'center',padding:'18px 24px',gap:18}}>
-        <div style={{flexShrink:0}}>
-          <img src="/solfus-logo.png.png" alt="SOLFUS" style={{height:72,objectFit:'contain',display:'block'}}/>
-        </div>
-        <div style={{flex:1,textAlign:'center'}}>
-          <p style={{fontSize:22,fontWeight:900,color:'#1e293b',margin:0,letterSpacing:2,textTransform:'uppercase'}}>Relatório Executivo</p>
-          <p style={{fontSize:8.5,color:'#94a3b8',margin:'4px 0 8px',letterSpacing:1,textTransform:'uppercase'}}>Análise de viabilidade para aquisição de ativo de geração</p>
-          <div style={{width:52,height:3,background:V,borderRadius:2,margin:'0 auto'}}/>
-        </div>
-        <div style={{flexShrink:0,border:`1.5px solid ${V}`,borderRadius:10,overflow:'hidden',minWidth:185}}>
-          <div style={{background:VL,padding:'6px 12px',borderBottom:`1px solid ${V}22`}}>
-            <p style={{fontSize:10,fontWeight:800,color:V,margin:0,textTransform:'uppercase',letterSpacing:1}}>Ativo em Análise</p>
-          </div>
-          <div style={{padding:'10px 12px',display:'flex',flexDirection:'column',gap:6}}>
-            <div style={{display:'flex',alignItems:'center',gap:8}}>
-              <span style={{fontSize:14}}>{'☀️'}</span>
-              <span style={{fontSize:11,color:'#1e293b',fontWeight:700}}>{at.nomeUsina || at.nomeEstudo || 'Sem nome'}</span>
+          {/* ═══ PÁGINA 1 – A: CABEÇALHO ═══════════════════════════════════ */}
+          <div id="exec-header" style={{background:'white',borderRadius:12,border:'1px solid #e2e8f0',boxShadow:'0 1px 8px rgba(0,0,0,.06)',display:'flex',alignItems:'center',padding:'18px 24px',gap:18}}>
+            <div style={{flexShrink:0}}>
+              <img src="/solfus-logo.png.png" alt="SOLFUS" style={{height:72,objectFit:'contain',display:'block'}}/>
             </div>
-            <div style={{display:'flex',alignItems:'center',gap:8}}>
-              <span style={{fontSize:14}}>{'🏢'}</span>
-              <span style={{fontSize:11,color:'#475569'}}>{at.concessionaria || '—'}</span>
+            <div style={{flex:1,textAlign:'center'}}>
+              <p style={{fontSize:22,fontWeight:900,color:'#1e293b',margin:0,letterSpacing:2,textTransform:'uppercase'}}>Relatório Executivo</p>
+              <p style={{fontSize:8.5,color:'#94a3b8',margin:'4px 0 8px',letterSpacing:1,textTransform:'uppercase'}}>Análise de viabilidade para aquisição de ativo de geração</p>
+              <div style={{width:52,height:3,background:V,borderRadius:2,margin:'0 auto'}}/>
             </div>
-            <div style={{display:'flex',alignItems:'center',gap:8}}>
-              <span style={{fontSize:14}}>{'📅'}</span>
-              <span style={{fontSize:11,color:'#475569'}}>{new Date().toLocaleDateString('pt-BR')}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* SEÇÃO 2 — RESUMO EXECUTIVO */}
-      <div style={{display:'flex',flexDirection:'column',gap:14}}>
-        <SecTitle title="Resumo Executivo" num="2"/>
-        <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-          <KpiCard label="VPL (R$)"           color={V}  icon={<IcoBar/>}    value={fmtBRL(res.vpl,0).replace('R$','').trim()} sub="Valor Presente Líquido"/>
-          <KpiCard label="TIR (% a.a.)"       color={OR} icon={<IcoPct/>}    value={res.tir != null ? `${tirStr}%` : '—'}  sub={`TMA: ${fmtNum(pf.tma,2)}%`}/>
-          <KpiCard label="Payback"            color={OR} icon={<IcoClock/>}  value={pbStr + (res.paybackSimples != null ? ' anos' : '')} sub="Retorno do capital"/>
-          <KpiCard label="Rec. Líquida Acumulada" color={V}  icon={<IcoDollar/>} value={fmtBRL(ebitdaAcum,0).replace('R$','').trim()} sub={`Ciclo ${pf.vidaUtil} anos`}/>
-          <KpiCard label="CAPEX Total (R$)"   color={OR} icon={<IcoCoins/>}  value={fmtBRL(res.capex,0).replace('R$','').trim()} sub="Investimento total"/>
-          <KpiCard label="Geração Anual (MWh)" color={V} icon={<IcoLight/>} value={fmtNum(geracaoAno,1)} sub={`${fmtNum(at.geracaoMediaMensal,1)} MWh/mês`}/>
-        </div>
-        <div style={{background:'#f8fafc',borderRadius:10,padding:'14px 16px',border:'1px solid #e2e8f0',display:'flex',gap:12,alignItems:'flex-start'}}>
-          <div style={{flexShrink:0,marginTop:2,background:VL,borderRadius:'50%',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <IcoCheck/>
-          </div>
-          <div>
-            <p style={{fontSize:11,fontWeight:800,color:V,textTransform:'uppercase',letterSpacing:1,margin:'0 0 5px'}}>Parecer Executivo</p>
-            <p style={{fontSize:11.5,color:'#475569',margin:0,lineHeight:1.7}}>{parecer}</p>
-          </div>
-        </div>
-        <Banner text={viavel_str}/>
-      </div>
-
-      {/* SEÇÃO 3 — PREMISSAS E INVESTIMENTOS */}
-      <div style={{display:'flex',flexDirection:'column',gap:14}}>
-        <SecTitle title="Premissas e Investimentos" num="3"/>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14,alignItems:'stretch'}}>
-          <PremCard title="Dados Técnicos"    color={V}  rows={tec}      icon={<IcoTec/>}/>
-          <PremCard title="Dados Financeiros"       color={OR} rows={fin}      icon={<IcoFin/>}/>
-          <PremCard title="OPEX (% CAPEX)"          color={SL} rows={opexRows} icon={<IcoOp/>}/>
-        </div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1.6fr',gap:14,alignItems:'stretch'}}>
-
-          {/* Estrutura de Investimento */}
-          <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
-            <div style={{background:VL,padding:'8px 12px',display:'flex',alignItems:'center',gap:7,borderBottom:`1px solid ${V}22`}}>
-              <div style={{color:V}}><IcoEst/></div>
-              <p style={{fontSize:10,fontWeight:800,color:V,margin:0,textTransform:'uppercase',letterSpacing:0.9}}>Estrutura de Investimento</p>
-            </div>
-            <div style={{padding:'12px 10px',display:'flex',flexDirection:'column',gap:8}}>
-              <InvCard label="Custo da Usina"       value={fmtBRL(cap.usina,0)}    icon={<IcoCoins/>}/>
-              <InvCard label="Obra de Rede"          value={fmtBRL(cap.obraRede,0)} icon={<IcoEst/>}/>
-              <InvCard label="Total do Investimento" value={fmtBRL(res.capex,0)}    highlight/>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:2}}>
-                <div style={{background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0',padding:'9px 12px'}}>
-                  <p style={{fontSize:8.5,color:SL,margin:'0 0 2px',fontWeight:600,textTransform:'uppercase'}}>OPEX Total Ano 1</p>
-                  <p style={{fontSize:13,fontWeight:800,color:'#1e293b',margin:0}}>{fmtBRL(opex1,0)}</p>
+            <div style={{flexShrink:0,border:`1.5px solid ${V}`,borderRadius:10,overflow:'hidden',minWidth:185}}>
+              <div style={{background:VL,padding:'6px 12px',borderBottom:`1px solid ${V}22`}}>
+                <p style={{fontSize:10,fontWeight:800,color:V,margin:0,textTransform:'uppercase',letterSpacing:1}}>Ativo em Análise</p>
+              </div>
+              <div style={{padding:'10px 12px',display:'flex',flexDirection:'column',gap:6}}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:14}}>{'☀️'}</span>
+                  <span style={{fontSize:11,color:'#1e293b',fontWeight:700}}>{at.nomeUsina || at.nomeEstudo || 'Sem nome'}</span>
                 </div>
-                <div style={{background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0',padding:'9px 12px'}}>
-                  <p style={{fontSize:8.5,color:SL,margin:'0 0 2px',fontWeight:600,textTransform:'uppercase'}}>Meses 1º Ano</p>
-                  <p style={{fontSize:13,fontWeight:800,color:'#1e293b',margin:0}}>{pf.mesesPrimeiroAno} meses</p>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:14}}>{'🏢'}</span>
+                  <span style={{fontSize:11,color:'#475569'}}>{at.concessionaria || '—'}</span>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:14}}>{'📅'}</span>
+                  <span style={{fontSize:11,color:'#475569'}}>{new Date().toLocaleDateString('pt-BR')}</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Destaques — 9 KPIs: grid 3 colunas */}
-          <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
-            <div style={{background:ORL,padding:'8px 12px',display:'flex',alignItems:'center',gap:7,borderBottom:`1px solid ${OR}22`}}>
-              <div style={{color:OR}}><IcoDest/></div>
-              <p style={{fontSize:10,fontWeight:800,color:OR,margin:0,textTransform:'uppercase',letterSpacing:0.9}}>Destaques do Projeto</p>
+          {/* ═══ PÁGINA 1 – B: RESUMO EXECUTIVO ════════════════════════════ */}
+          <div id="exec-resumo" style={{display:'flex',flexDirection:'column',gap:14}}>
+            <SecTitle title="Resumo Executivo" num="2"/>
+            <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+              <KpiCard label="VPL (R$)"               color={V}  icon={<IcoBar/>}    value={fmtBRL(res.vpl,0).replace('R$','').trim()} sub="Valor Presente Líquido"/>
+              <KpiCard label="TIR (% a.a.)"           color={OR} icon={<IcoPct/>}    value={res.tir != null ? `${tirStr}%` : '—'} sub={`TMA: ${fmtNum(pf.tma,2)}%`}/>
+              <KpiCard label="Payback"                color={OR} icon={<IcoClock/>}  value={pbStr+(res.paybackSimples!=null?' anos':'')} sub="Retorno do capital"/>
+              <KpiCard label="Rec. Líquida Acumulada" color={V}  icon={<IcoDollar/>} value={fmtBRL(ebitdaAcum,0).replace('R$','').trim()} sub={`Ciclo ${pf.vidaUtil} anos`}/>
+              <KpiCard label="CAPEX Total (R$)"       color={OR} icon={<IcoCoins/>}  value={fmtBRL(res.capex,0).replace('R$','').trim()} sub="Investimento total"/>
+              <KpiCard label="Geração Anual (MWh)"    color={V}  icon={<IcoLight/>}  value={fmtNum(geracaoAno,1)} sub={`${fmtNum(at.geracaoMediaMensal,1)} MWh/mês`}/>
             </div>
-            <div style={{padding:'12px 10px',display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
-              <MiniKpi label="Rec. Bruta Ano 1"            value={fmtBRL(recBruta1,0)}    accent={V}/>
-              <MiniKpi label="Rec. Líquida Ano 1"     value={fmtBRL(recLiq1,0)}      accent={OR}/>
-              <MiniKpi label="TIR (% a.a.)"                value={res.tir != null ? `${tirStr}%` : '—'} accent={OR}/>
-              <MiniKpi label="VPL (R$)"                    value={fmtBRL(res.vpl,0)}      accent={V}/>
-              <MiniKpi label="Payback Simples"             value={pbStr+(res.paybackSimples != null?' anos':'')} accent={OR}/>
-              <MiniKpi label={`Rec. Bruta Ano ${anoLast?.ano ?? pf.vidaUtil}`} value={fmtBRL(recBrutaLast,0)} accent={V}/>
-              <MiniKpi label={`Rec. Líq. Ano ${anoLast?.ano ?? pf.vidaUtil}`} value={fmtBRL(recLiqLast,0)} accent={V}/>
-              <MiniKpi label="Rec. Líquida Acumulada"      value={fmtBRL(ebitdaAcum,0)}   accent={OR}/>
-              <MiniKpi label="Receita Acumulada"           value={fmtBRL(recBrutaAcum,0)} accent={V}/>
+            <div style={{background:'#f8fafc',borderRadius:10,padding:'14px 16px',border:'1px solid #e2e8f0',display:'flex',gap:12,alignItems:'flex-start'}}>
+              <div style={{flexShrink:0,marginTop:2,background:VL,borderRadius:'50%',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <IcoCheck/>
+              </div>
+              <div>
+                <p style={{fontSize:11,fontWeight:800,color:V,textTransform:'uppercase',letterSpacing:1,margin:'0 0 5px'}}>Parecer Executivo</p>
+                <p style={{fontSize:11.5,color:'#475569',margin:0,lineHeight:1.7}}>{parecer}</p>
+              </div>
+            </div>
+            <Banner text={viavel_str}/>
+          </div>
+
+          {/* ═══ PÁGINA 1 – C: PREMISSAS (3 cards) ═════════════════════════ */}
+          <div id="exec-prem-group1" style={{display:'flex',flexDirection:'column',gap:14}}>
+            <SecTitle title="Premissas e Investimentos" num="3"/>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14,alignItems:'stretch'}}>
+              <PremCard title="Dados Técnicos"    color={V}  rows={tec}      icon={<IcoTec/>}/>
+              <PremCard title="Dados Financeiros" color={OR} rows={fin}      icon={<IcoFin/>}/>
+              <PremCard title="OPEX (% CAPEX)"    color={SL} rows={opexRows} icon={<IcoOp/>}/>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* SEÇÃO 4 — DESEMPENHO FINANCEIRO */}
-      <div style={{display:'flex',flexDirection:'column',gap:16}}>
-        <SecTitle title="Desempenho Financeiro" num="4"/>
-
-        {/* Tabela */}
-        <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
-          <div style={{background:VL,padding:'9px 14px',borderBottom:`1px solid ${V}22`}}>
-            <p style={{fontSize:11,fontWeight:800,color:V,margin:0,textTransform:'uppercase',letterSpacing:1,textAlign:'center'}}>Resumo Financeiro (valores em R$)</p>
+          {/* ═══ PÁGINA 2 – A: INVESTIMENTO + DESTAQUES ════════════════════ */}
+          <div id="exec-prem-group2" style={{display:'flex',flexDirection:'column',gap:14}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1.6fr',gap:14,alignItems:'stretch'}}>
+              <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
+                <div style={{background:VL,padding:'8px 12px',display:'flex',alignItems:'center',gap:7,borderBottom:`1px solid ${V}22`}}>
+                  <div style={{color:V}}><IcoEst/></div>
+                  <p style={{fontSize:10,fontWeight:800,color:V,margin:0,textTransform:'uppercase',letterSpacing:0.9}}>Estrutura de Investimento</p>
+                </div>
+                <div style={{padding:'12px 10px',display:'flex',flexDirection:'column',gap:8}}>
+                  <InvCard label="Custo da Usina"       value={fmtBRL(cap.usina,0)}    icon={<IcoCoins/>}/>
+                  <InvCard label="Obra de Rede"         value={fmtBRL(cap.obraRede,0)} icon={<IcoEst/>}/>
+                  <InvCard label="Total do Investimento" value={fmtBRL(res.capex,0)}   highlight/>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:2}}>
+                    <div style={{background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0',padding:'9px 12px'}}>
+                      <p style={{fontSize:8.5,color:SL,margin:'0 0 2px',fontWeight:600,textTransform:'uppercase'}}>OPEX Total Ano 1</p>
+                      <p style={{fontSize:13,fontWeight:800,color:'#1e293b',margin:0}}>{fmtBRL(opex1,0)}</p>
+                    </div>
+                    <div style={{background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0',padding:'9px 12px'}}>
+                      <p style={{fontSize:8.5,color:SL,margin:'0 0 2px',fontWeight:600,textTransform:'uppercase'}}>Meses 1º Ano</p>
+                      <p style={{fontSize:13,fontWeight:800,color:'#1e293b',margin:0}}>{pf.mesesPrimeiroAno} meses</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
+                <div style={{background:ORL,padding:'8px 12px',display:'flex',alignItems:'center',gap:7,borderBottom:`1px solid ${OR}22`}}>
+                  <div style={{color:OR}}><IcoDest/></div>
+                  <p style={{fontSize:10,fontWeight:800,color:OR,margin:0,textTransform:'uppercase',letterSpacing:0.9}}>Destaques do Projeto</p>
+                </div>
+                <div style={{padding:'12px 10px',display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
+                  <MiniKpi label="Rec. Bruta Ano 1"   value={fmtBRL(recBruta1,0)}  accent={V}/>
+                  <MiniKpi label="Rec. Líquida Ano 1" value={fmtBRL(recLiq1,0)}    accent={OR}/>
+                  <MiniKpi label="TIR (% a.a.)"       value={res.tir!=null?`${tirStr}%`:'—'} accent={OR}/>
+                  <MiniKpi label="VPL (R$)"           value={fmtBRL(res.vpl,0)}    accent={V}/>
+                  <MiniKpi label="Payback Simples"    value={pbStr+(res.paybackSimples!=null?' anos':'')} accent={OR}/>
+                  <MiniKpi label={`Rec. Bruta Ano ${anoLast?.ano??pf.vidaUtil}`} value={fmtBRL(recBrutaLast,0)} accent={V}/>
+                  <MiniKpi label={`Rec. Líq. Ano ${anoLast?.ano??pf.vidaUtil}`}  value={fmtBRL(recLiqLast,0)}  accent={V}/>
+                  <MiniKpi label="Rec. Líquida Acum." value={fmtBRL(ebitdaAcum,0)}    accent={OR}/>
+                  <MiniKpi label="Receita Acumulada"  value={fmtBRL(recBrutaAcum,0)}  accent={V}/>
+                </div>
+              </div>
+            </div>
           </div>
-          <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
-              <thead>
-                <tr style={{background:'#f8fafc'}}>
-                  {['Ano','Receita Bruta','Tributos','OPEX Total','Receita Líquida'].map(h => (
-                    <th key={h} style={{padding:'8px 12px',textAlign:h==='Ano'?'center':'right',fontWeight:700,color:'#475569',borderBottom:'1px solid #e2e8f0',whiteSpace:'nowrap'}}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {anoRows.map((r, i) => {
-                  const isLast = i === anoRows.length - 1
-                  if (i > 5 && !isLast) return null
-                  return (
-                    <>
-                      {i === 5 && anoRows.length > 6 && (
-                        <tr key="sep"><td colSpan={5} style={{textAlign:'center',padding:'4px',fontSize:12,color:'#94a3b8'}}>…</td></tr>
-                      )}
-                      <tr key={r.ano} style={{background:isLast?VL:i%2===0?'white':'#f8fafc',borderBottom:'1px solid #f1f5f9'}}>
-                        <td style={{padding:'7px 12px',textAlign:'center',fontWeight:700,color:isLast?V:'#1e293b'}}>{r.ano}</td>
-                        <td style={{padding:'7px 12px',textAlign:'right',color:'#1e293b'}}>{fmtM(r.receitaBruta)}</td>
-                        <td style={{padding:'7px 12px',textAlign:'right',color:'#dc2626'}}>{fmtM(r.tributos)}</td>
-                        <td style={{padding:'7px 12px',textAlign:'right',color:'#64748b'}}>{fmtM(r.opexTotal)}</td>
-                        <td style={{padding:'7px 12px',textAlign:'right',fontWeight:700,color:r.ebitda>=0?'#15803d':'#dc2626'}}>{fmtM(r.ebitda)}</td>
-                      </tr>
-                    </>
-                  )
-                })}
-              </tbody>
-            </table>
+
+          {/* ═══ PÁGINA 2 – B: TABELA FINANCEIRA ═══════════════════════════ */}
+          <div id="exec-fin-group1" style={{display:'flex',flexDirection:'column',gap:16}}>
+            <SecTitle title="Desempenho Financeiro" num="4"/>
+            <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
+              <div style={{background:VL,padding:'9px 14px',borderBottom:`1px solid ${V}22`}}>
+                <p style={{fontSize:11,fontWeight:800,color:V,margin:0,textTransform:'uppercase',letterSpacing:1,textAlign:'center'}}>Resumo Financeiro (valores em R$)</p>
+              </div>
+              <div style={{overflowX:'auto'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                  <thead>
+                    <tr style={{background:'#f8fafc'}}>
+                      {['Ano','Receita Bruta','Tributos','OPEX Total','Receita Líquida'].map(h => (
+                        <th key={h} style={{padding:'8px 12px',textAlign:h==='Ano'?'center':'right',fontWeight:700,color:'#475569',borderBottom:'1px solid #e2e8f0',whiteSpace:'nowrap'}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {anoRows.map((r,i) => {
+                      const isLast = i === anoRows.length-1
+                      if (i > 5 && !isLast) return null
+                      return (
+                        <>
+                          {i===5 && anoRows.length>6 && (
+                            <tr key="sep"><td colSpan={5} style={{textAlign:'center',padding:'4px',fontSize:12,color:'#94a3b8'}}>…</td></tr>
+                          )}
+                          <tr key={r.ano} style={{background:isLast?VL:i%2===0?'white':'#f8fafc',borderBottom:'1px solid #f1f5f9'}}>
+                            <td style={{padding:'7px 12px',textAlign:'center',fontWeight:700,color:isLast?V:'#1e293b'}}>{r.ano}</td>
+                            <td style={{padding:'7px 12px',textAlign:'right',color:'#1e293b'}}>{fmtM(r.receitaBruta)}</td>
+                            <td style={{padding:'7px 12px',textAlign:'right',color:'#dc2626'}}>{fmtM(r.tributos)}</td>
+                            <td style={{padding:'7px 12px',textAlign:'right',color:'#64748b'}}>{fmtM(r.opexTotal)}</td>
+                            <td style={{padding:'7px 12px',textAlign:'right',fontWeight:700,color:r.ebitda>=0?'#15803d':'#dc2626'}}>{fmtM(r.ebitda)}</td>
+                          </tr>
+                        </>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
-        </div>
 
-        {/* Gráfico 1 — Receita Líquida */}
-        <div className="pdf-avoid" style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
-          <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Receita Líquida por Ano (R$)</p>
-          <ResponsiveContainer width="100%" height={CHART_H}>
-            <AreaChart data={chartData} margin={{top:6,right:24,left:12,bottom:0}}>
-              <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3"/>
-              <XAxis dataKey="ano" tick={{fontSize:10,fill:'#94a3b8'}} label={{value:'Ano',position:'insideBottom',offset:-2,fontSize:10,fill:'#94a3b8'}}/>
-              <YAxis tickFormatter={fmtM} tick={{fontSize:10,fill:'#94a3b8'}} width={68}/>
-              <Tooltip content={<ChartTip/>}/>
-              <Area type="monotone" dataKey="recLiq" name="Rec. Líquida" stroke={V} strokeWidth={2.5} fill={V} fillOpacity={0.12} dot={false} activeDot={{r:5}}/>
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Gráfico 2 — Receita Bruta × OPEX */}
-        <div className="pdf-avoid" style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
-          <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Evolução da Receita Bruta e OPEX (R$)</p>
-          <ResponsiveContainer width="100%" height={CHART_H}>
-            <ComposedChart data={chartData} margin={{top:6,right:24,left:12,bottom:0}}>
-              <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3"/>
-              <XAxis dataKey="ano" tick={{fontSize:10,fill:'#94a3b8'}} label={{value:'Ano',position:'insideBottom',offset:-2,fontSize:10,fill:'#94a3b8'}}/>
-              <YAxis tickFormatter={fmtM} tick={{fontSize:10,fill:'#94a3b8'}} width={68}/>
-              <Tooltip content={<ChartTip/>}/>
-              <Legend iconSize={10} wrapperStyle={{fontSize:10,paddingTop:8}}/>
-              <Bar dataKey="recBruta" name="Receita Bruta" fill={OR} fillOpacity={0.75} radius={[3,3,0,0]}/>
-              <Line type="monotone" dataKey="opexT" name="OPEX Total" stroke="#dc2626" strokeWidth={2} dot={false} activeDot={{r:5}}/>
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Gráfico 3 — Fluxo Acumulado */}
-        <div className="pdf-avoid" style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
-          <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Fluxo Acumulado (R$)</p>
-          <ResponsiveContainer width="100%" height={CHART_H}>
-            <AreaChart data={fluxoData} margin={{top:6,right:24,left:12,bottom:0}}>
-              <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3"/>
-              <XAxis dataKey="ano" tick={{fontSize:10,fill:'#94a3b8'}} label={{value:'Ano',position:'insideBottom',offset:-2,fontSize:10,fill:'#94a3b8'}}/>
-              <YAxis tickFormatter={fmtM} tick={{fontSize:10,fill:'#94a3b8'}} width={68}/>
-              <Tooltip content={<ChartTip/>}/>
-              <Area type="monotone" dataKey="fluxo" name="Fluxo Acumulado" stroke={V} strokeWidth={2.5} fill={V} fillOpacity={0.12} dot={false} activeDot={{r:6}}/>
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Conclusão */}
-        <div className="pdf-avoid" style={{background:'#f8fafc',borderRadius:10,padding:'14px 16px',border:'1px solid #e2e8f0',display:'flex',gap:12,alignItems:'flex-start'}}>
-          <div style={{flexShrink:0,background:VL,borderRadius:'50%',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <IcoCheck/>
+          {/* ═══ PÁGINA 2 – C: GRÁFICO RECEITA LÍQUIDA ═════════════════════ */}
+          <div id="exec-chart1" style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
+            <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Receita Líquida por Ano (R$)</p>
+            <ResponsiveContainer width="100%" height={CHART_H}>
+              <AreaChart data={chartData} margin={{top:6,right:24,left:12,bottom:0}}>
+                <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3"/>
+                <XAxis dataKey="ano" tick={{fontSize:10,fill:'#94a3b8'}} label={{value:'Ano',position:'insideBottom',offset:-2,fontSize:10,fill:'#94a3b8'}}/>
+                <YAxis tickFormatter={fmtM} tick={{fontSize:10,fill:'#94a3b8'}} width={68}/>
+                <Tooltip content={<ChartTip/>}/>
+                <Area type="monotone" dataKey="recLiq" name="Rec. Líquida" stroke={V} strokeWidth={2.5} fill={V} fillOpacity={0.12} dot={false} activeDot={{r:5}}/>
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
-          <div>
-            <p style={{fontSize:11,fontWeight:800,color:V,textTransform:'uppercase',letterSpacing:1,margin:'0 0 5px'}}>Conclusão</p>
-            <p style={{fontSize:11.5,color:'#475569',margin:0,lineHeight:1.7}}>
-              O projeto apresenta TIR de {res.tir != null ? `${tirStr}%` : '—'}{res.tir != null ? `, ${res.tir > pf.tma ? `superior à TMA de ${fmtNum(pf.tma,2)}%` : `abaixo da TMA de ${fmtNum(pf.tma,2)}%`},` : ','} com Payback estimado em {pbStr}{res.paybackSimples != null ? ' anos' : ''} e VPL de {fmtBRL(res.vpl,0)}, {res.vpl > 0 ? 'demonstrando viabilidade econômica sob as premissas adotadas.' : 'indicando necessidade de revisão das premissas do projeto.'}
-            </p>
-          </div>
+
+          {/* ═══ PÁGINA 3 — Receita Bruta + Fluxo + Conclusão + Banner ═════ */}
+          <div id="exec-charts-group" style={{display:'flex',flexDirection:'column',gap:16}}>
+
+            {/* Gráfico — Receita Bruta × OPEX */}
+            <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
+              <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Evolução da Receita Bruta e OPEX (R$)</p>
+              <ResponsiveContainer width="100%" height={CHART_H}>
+                <ComposedChart data={chartData} margin={{top:6,right:24,left:12,bottom:0}}>
+                  <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3"/>
+                  <XAxis dataKey="ano" tick={{fontSize:10,fill:'#94a3b8'}} label={{value:'Ano',position:'insideBottom',offset:-2,fontSize:10,fill:'#94a3b8'}}/>
+                  <YAxis tickFormatter={fmtM} tick={{fontSize:10,fill:'#94a3b8'}} width={68}/>
+                  <Tooltip content={<ChartTip/>}/>
+                  <Legend iconSize={10} wrapperStyle={{fontSize:10,paddingTop:8}}/>
+                  <Bar dataKey="recBruta" name="Receita Bruta" fill={OR} fillOpacity={0.75} radius={[3,3,0,0]}/>
+                  <Line type="monotone" dataKey="opexT" name="OPEX Total" stroke="#dc2626" strokeWidth={2} dot={false} activeDot={{r:5}}/>
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Gráfico — Fluxo Acumulado */}
+            <div style={{background:'white',borderRadius:10,border:'1px solid #e2e8f0',padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,.05)'}}>
+              <p style={{fontSize:11,fontWeight:700,color:'#475569',margin:'0 0 14px',textAlign:'center',textTransform:'uppercase',letterSpacing:0.8}}>Fluxo Acumulado (R$)</p>
+              <ResponsiveContainer width="100%" height={CHART_H}>
+                <AreaChart data={fluxoData} margin={{top:6,right:24,left:12,bottom:0}}>
+                  <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3"/>
+                  <XAxis dataKey="ano" tick={{fontSize:10,fill:'#94a3b8'}} label={{value:'Ano',position:'insideBottom',offset:-2,fontSize:10,fill:'#94a3b8'}}/>
+                  <YAxis tickFormatter={fmtM} tick={{fontSize:10,fill:'#94a3b8'}} width={68}/>
+                  <Tooltip content={<ChartTip/>}/>
+                  <Area type="monotone" dataKey="fluxo" name="Fluxo Acumulado" stroke={V} strokeWidth={2.5} fill={V} fillOpacity={0.12} dot={false} activeDot={{r:6}}/>
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Conclusão */}
+            <div style={{background:'#f8fafc',borderRadius:10,padding:'14px 16px',border:'1px solid #e2e8f0',display:'flex',gap:12,alignItems:'flex-start'}}>
+              <div style={{flexShrink:0,background:VL,borderRadius:'50%',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <IcoCheck/>
+              </div>
+              <div>
+                <p style={{fontSize:11,fontWeight:800,color:V,textTransform:'uppercase',letterSpacing:1,margin:'0 0 5px'}}>Conclusão</p>
+                <p style={{fontSize:11.5,color:'#475569',margin:0,lineHeight:1.7}}>
+                  O projeto apresenta TIR de {res.tir!=null?`${tirStr}%`:'—'}{res.tir!=null?`, ${res.tir>pf.tma?`superior à TMA de ${fmtNum(pf.tma,2)}%`:`abaixo da TMA de ${fmtNum(pf.tma,2)}%`},`:','} com Payback estimado em {pbStr}{res.paybackSimples!=null?' anos':''} e VPL de {fmtBRL(res.vpl,0)}, {res.vpl>0?'demonstrando viabilidade econômica sob as premissas adotadas.':'indicando necessidade de revisão das premissas do projeto.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Banner final */}
+            <Banner text={viavel_str}/>
+
+            {/* Rodapé da tela */}
+            <div style={{textAlign:'center',borderTop:'1px solid #e2e8f0',paddingTop:10}}>
+              <p style={{fontSize:10,color:'#94a3b8',margin:0}}>
+                <span style={{color:V,fontWeight:700}}>SOLFUS</span>{' '}
+                Engenharia e Conservação de Energia — Análise gerada em {new Date().toLocaleDateString('pt-BR')}
+              </p>
+            </div>
+
+          </div>{/* exec-charts-group */}
+
         </div>
-
-        <Banner text={viavel_str}/>
-      </div>
-
-      {/* Rodapé */}
-      <div style={{textAlign:'center',borderTop:'1px solid #e2e8f0',paddingTop:10}}>
-        <p style={{fontSize:10,color:'#94a3b8',margin:0}}>
-          <span style={{color:V,fontWeight:700}}>SOLFUS</span>{' '}
-          Engenharia e Conservação de Energia — Análise gerada em {new Date().toLocaleDateString('pt-BR')}
-        </p>
-      </div>
-    </div>
-    </div>
+      </div>{/* executive-report-export */}
     </div>
   )
 }

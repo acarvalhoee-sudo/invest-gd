@@ -2,7 +2,7 @@
  * pdfService.ts — Relatório INVEST GD v4 PREMIUM
  *
  * P1: Resumo Executivo — 6 KPI cards grandes + Parecer rico + Banner
- * P2: Premissas (100% cards, sem autoTable) + 8 Destaques
+ * P2: Premissas (100% cards, sem autoTable) + 9 Destaques
  * P3: Tabela 5 colunas + 2 gráficos grandes
  */
 
@@ -36,19 +36,12 @@ const st  = (d: jsPDF, c: RGB) => d.setTextColor(c[0], c[1], c[2])
 const brl = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 0 })
 const num = (n: number, d = 2) =>
   n.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })
-const fmM = (n: number) => {
-  const a = Math.abs(n), s = n < 0 ? '-' : ''
-  return a >= 1e6 ? `${s}R$ ${(a/1e6).toFixed(1)}M`
-       : a >= 1e3 ? `${s}R$ ${(a/1e3).toFixed(0)}K`
-       : `${s}R$ ${brl(a)}`
-}
 const fmMbare = (n: number) => {
   const a = Math.abs(n), s = n < 0 ? '-' : ''
   return a >= 1e6 ? `${s}${(a/1e6).toFixed(1)}M`
        : a >= 1e3 ? `${s}${(a/1e3).toFixed(0)}K`
        : brl(a)
 }
-// autoTable fillColor helper
 const rgb3 = (c: RGB): [number,number,number] => [c[0], c[1], c[2]]
 
 /* ── lastAutoTable helper ───────────────────────────────────────── */
@@ -59,12 +52,11 @@ const finalY = (d: jsPDF) => (d as unknown as DocWithAutoTable).lastAutoTable.fi
    LOGO SOLFUS — starburst + texto
 ══════════════════════════════════════════════════════════════════ */
 function drawLogo(doc: jsPDF, x: number, y: number, width: number) {
-  const h  = width * 0.38            // logo height proportional
-  const cx = x + width * 0.21       // starburst center x
-  const cy = y + h * 0.50           // starburst center y
-  const r  = h * 0.42               // base radius
+  const h  = width * 0.38
+  const cx = x + width * 0.21
+  const cy = y + h * 0.50
+  const r  = h * 0.42
 
-  // ── 16 radiating spikes ──
   for (let i = 0; i < 16; i++) {
     const angle  = (i / 16) * 2 * Math.PI - Math.PI / 2
     const isLong = i % 2 === 0
@@ -74,38 +66,27 @@ function drawLogo(doc: jsPDF, x: number, y: number, width: number) {
     doc.line(cx, cy, cx + Math.cos(angle) * len, cy + Math.sin(angle) * len)
   }
 
-  // ── Large outer arc (thick, sweeping) ──
   sd(doc, LARANJA); doc.setLineWidth(2.8)
-  const arcR  = r * 1.72
-  const arcN  = 40
-  const aS    = -2.05
-  const aE    = 0.42
+  const arcR = r * 1.72, arcN = 40, aS = -2.05, aE = 0.42
   for (let i = 0; i < arcN; i++) {
     const a1 = aS + (i / arcN) * (aE - aS)
     const a2 = aS + ((i + 1) / arcN) * (aE - aS)
-    doc.line(
-      cx + Math.cos(a1) * arcR, cy + Math.sin(a1) * arcR,
-      cx + Math.cos(a2) * arcR, cy + Math.sin(a2) * arcR,
-    )
+    doc.line(cx + Math.cos(a1)*arcR, cy + Math.sin(a1)*arcR,
+             cx + Math.cos(a2)*arcR, cy + Math.sin(a2)*arcR)
   }
 
-  // ── Second inner arc ──
   sd(doc, VERMELHO); doc.setLineWidth(1.0)
   const arcR2 = r * 1.48
   for (let i = 0; i < arcN; i++) {
     const a1 = aS + 0.4 + (i / arcN) * (aE - aS - 0.5)
     const a2 = aS + 0.4 + ((i + 1) / arcN) * (aE - aS - 0.5)
-    doc.line(
-      cx + Math.cos(a1) * arcR2, cy + Math.sin(a1) * arcR2,
-      cx + Math.cos(a2) * arcR2, cy + Math.sin(a2) * arcR2,
-    )
+    doc.line(cx + Math.cos(a1)*arcR2, cy + Math.sin(a1)*arcR2,
+             cx + Math.cos(a2)*arcR2, cy + Math.sin(a2)*arcR2)
   }
 
-  // ── Center dot (green outer, yellow inner) ──
   sf(doc, VERDE); doc.circle(cx, cy, r * 0.20, 'F')
   sf(doc, [220, 180, 0] as RGB); doc.circle(cx, cy, r * 0.09, 'F')
 
-  // ── SOLFUS text ──
   st(doc, PRETO)
   doc.setFont('helvetica', 'bold')
   const fs = h * 1.80
@@ -119,20 +100,15 @@ function drawLogo(doc: jsPDF, x: number, y: number, width: number) {
 function drawFullHeader(doc: jsPDF, study: Study) {
   const { ativo } = study
 
-  // Verde bar top
   sf(doc, VERDE); doc.rect(0, 0, PW, 6, 'F')
-
-  // Logo
   drawLogo(doc, ML, 7, 50)
 
-  // Title block
   st(doc, PRETO); doc.setFont('helvetica', 'bold'); doc.setFontSize(12)
   doc.text('ANÁLISE DE VIABILIDADE', ML + 55, 14)
   doc.text('PARA AQUISIÇÃO DE ATIVO DE GERAÇÃO', ML + 55, 20)
   st(doc, CINZA_DK); doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5)
   doc.text(`${FONTE_LABELS[ativo.fonte] ?? ativo.fonte}  ·  ${ativo.tipoGD}  ·  ${ativo.concessionaria || '—'}  ·  ${new Date().toLocaleDateString('pt-BR')}`, ML + 55, 26)
 
-  // Plant name badge (right side)
   const bw = 68, bh = 22, bx = PW - MR - bw, by = 8
   sf(doc, VERDE); sd(doc, VERDE); doc.rect(bx, by, bw, bh, 'F')
   st(doc, BRANCO); doc.setFont('helvetica', 'normal'); doc.setFontSize(6)
@@ -141,7 +117,6 @@ function drawFullHeader(doc: jsPDF, study: Study) {
   const nameLines = doc.splitTextToSize(ativo.nomeUsina || 'Usina', bw - 6)
   doc.text(nameLines, bx + bw / 2, by + 11.5, { align: 'center' })
 
-  // Orange accent line under header
   sf(doc, LARANJA); doc.rect(ML, 32, CW, 1.2, 'F')
 }
 
@@ -184,7 +159,7 @@ function sectionBanner(doc: jsPDF, y: number, title: string, sub?: string) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   KPI CARD — PREMIUM (grande, impactante)
+   KPI CARD — PREMIUM
 ══════════════════════════════════════════════════════════════════ */
 type Accent = 'green' | 'orange' | 'red' | 'gray'
 
@@ -197,30 +172,22 @@ function drawKpiPremium(
     accent === 'orange' ? LARANJA :
     accent === 'red'    ? VERMELHO : CINZA_MD
 
-  // Card background + shadow effect (slightly offset rect)
   sf(doc, CINZA_LT); doc.rect(x + 0.6, y + 0.6, w, h, 'F')
   sf(doc, BRANCO); sd(doc, CINZA_MD); doc.setLineWidth(0.2)
   doc.rect(x, y, w, h, 'FD')
-
-  // Top accent bar
   sf(doc, acRGB); doc.rect(x, y, w, 5, 'F')
-
-  // Bottom accent bar
   sf(doc, acRGB); doc.rect(x, y + h - 2, w, 2, 'F')
 
-  // Label (uppercase, small, gray)
   st(doc, CINZA_DK); doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5)
   const lls = doc.splitTextToSize(label.toUpperCase(), w - 6)
   doc.text(lls, x + w / 2, y + 12, { align: 'center' })
 
-  // Value — hero number
   const valCol: RGB = accent === 'green' ? VERDE : accent === 'orange' ? LARANJA : accent === 'red' ? VERMELHO : PRETO
   st(doc, valCol); doc.setFont('helvetica', 'bold')
   const vLen = value.length
   doc.setFontSize(vLen > 14 ? 12 : vLen > 10 ? 15 : vLen > 7 ? 18 : 22)
   doc.text(value, x + w / 2, y + h * 0.62, { align: 'center' })
 
-  // Unit / subtitle
   if (unit) {
     st(doc, CINZA_DK); doc.setFont('helvetica', 'normal'); doc.setFontSize(6)
     doc.text(unit, x + w / 2, y + h - 6, { align: 'center' })
@@ -228,7 +195,7 @@ function drawKpiPremium(
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   DATA CARD (página 2 — sem autoTable)
+   DATA CARD (página 2)
 ══════════════════════════════════════════════════════════════════ */
 function drawDataCard(
   doc: jsPDF, x: number, y: number, w: number, h: number,
@@ -236,15 +203,11 @@ function drawDataCard(
 ) {
   sf(doc, isEven ? CINZA_BG : BRANCO)
   doc.rect(x, y, w, h, 'F')
-  // left accent bar
   sf(doc, accent); doc.rect(x, y, 2.5, h, 'F')
-  // label
   st(doc, CINZA_DK); doc.setFont('helvetica', 'normal'); doc.setFontSize(5.8)
   doc.text(label, x + 6, y + h * 0.42)
-  // value
   st(doc, PRETO); doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5)
   doc.text(value, x + w - 3, y + h * 0.75, { align: 'right' })
-  // thin bottom border
   sd(doc, CINZA_LT); doc.setLineWidth(0.15)
   doc.line(x, y + h, x + w, y + h)
 }
@@ -294,7 +257,6 @@ function drawBarChart(
   doc: jsPDF, x: number, y: number, w: number, h: number,
   title: string, anos: number[], series: BarSeries[],
 ) {
-  // Chart title
   st(doc, PRETO); doc.setFont('helvetica', 'bold'); doc.setFontSize(8)
   doc.text(title, x + w / 2, y + 6, { align: 'center' })
 
@@ -305,10 +267,8 @@ function drawBarChart(
   const allVals = series.flatMap(s => s.values).map(Math.abs)
   const maxV    = Math.max(...allVals, 1)
 
-  // Plot area background
   sf(doc, CINZA_BG); doc.rect(x + pL, y + pT, cw, ch, 'F')
 
-  // Grid lines + Y labels
   const gridCount = 5
   sd(doc, [220, 220, 220] as RGB); doc.setLineWidth(0.12)
   for (let i = 0; i <= gridCount; i++) {
@@ -319,7 +279,6 @@ function drawBarChart(
     doc.text(fmMbare(v), x + pL - 1.5, gy + 1.2, { align: 'right' })
   }
 
-  // Bars
   const slotW = cw / n
   const sn    = series.length
   const barW  = Math.min(slotW * 0.85 / sn, 9)
@@ -333,12 +292,10 @@ function drawBarChart(
     })
   })
 
-  // Axes
   sd(doc, CINZA_MD); doc.setLineWidth(0.4)
   doc.line(x + pL, y + pT, x + pL, y + pT + ch)
   doc.line(x + pL, y + pT + ch, x + pL + cw, y + pT + ch)
 
-  // X labels
   st(doc, CINZA_DK); doc.setFont('helvetica', 'normal'); doc.setFontSize(4.2)
   const step = n > 15 ? 5 : n > 8 ? 2 : 1
   anos.forEach((a, ai) => {
@@ -349,7 +306,6 @@ function drawBarChart(
   })
   doc.text('Ano', x + pL + cw / 2, y + pT + ch + 9, { align: 'center' })
 
-  // Legend
   series.forEach((ser, si) => {
     const lx = x + pL + 2 + si * 55
     const ly = y + pT + ch + 13
@@ -402,60 +358,52 @@ export async function gerarRelatorioPDF(study: Study, res: ResultadosFinanceiros
      ╚══════════════════════════════════════════════════════════════╝ */
   drawFullHeader(doc, study)
 
-  // ── INDICADORES PRINCIPAIS ──────────────────────────────────────
   let cy = 35
   cy = sectionBanner(doc, cy, 'INDICADORES PRINCIPAIS', 'Métricas-chave do investimento') + 3
 
   interface KpiDef { label: string; value: string; unit: string; accent: Accent }
   const kpis: KpiDef[] = [
-    { label: 'Valor Presente Líquido',    value: brl(vpl),                           unit: 'R$  ·  VPL',                              accent: vpl >= 0 ? 'green' : 'red' },
-    { label: 'Taxa Interna de Retorno',   value: tir ? `${num(tir, 2)}%` : '—',    unit: `a.a.  ·  TMA: ${num(pf.tma, 2)}%`,       accent: tir && tir > pf.tma ? 'orange' : 'red' },
-    { label: 'Payback Simples',           value: pb ? `${num(pb, 1)} anos` : '—',  unit: 'Retorno do capital investido',            accent: 'orange' },
-    { label: 'Rec. Líquida Acumulada',    value: brl(ebitdaAcum),                    unit: `R$  ·  Ciclo ${pf.vidaUtil} anos`,         accent: 'green' },
-    { label: 'CAPEX Total',               value: brl(capex.total),                   unit: 'R$  ·  Investimento total',               accent: 'gray' },
-    { label: 'Geração Anual',             value: brl(geranual),                      unit: `MWh  ·  ${num(geramens, 1)} MWh/mês`,    accent: 'green' },
+    { label: 'Valor Presente Líquido',  value: brl(vpl),                          unit: 'R$  ·  VPL',                           accent: vpl >= 0 ? 'green' : 'red'              },
+    { label: 'Taxa Interna de Retorno', value: tir ? `${num(tir, 2)}%` : '—',   unit: `a.a.  ·  TMA: ${num(pf.tma, 2)}%`,    accent: tir && tir > pf.tma ? 'orange' : 'red'  },
+    { label: 'Payback Simples',         value: pb ? `${num(pb, 1)} anos` : '—', unit: 'Retorno do capital investido',          accent: 'orange'                                 },
+    { label: 'Rec. Líquida Acumulada',  value: brl(ebitdaAcum),                   unit: `R$  ·  Ciclo ${pf.vidaUtil} anos`,      accent: 'green'                                  },
+    { label: 'CAPEX Total',             value: brl(capex.total),                  unit: 'R$  ·  Investimento total',            accent: 'gray'                                   },
+    { label: 'Geração Anual',           value: brl(geranual),                     unit: `MWh  ·  ${num(geramens, 1)} MWh/mês`, accent: 'green'                                  },
   ]
 
   const kW = CW / 3 - 1.2, kH = 55
-  // Row 1
   kpis.slice(0, 3).forEach((k, i) =>
     drawKpiPremium(doc, ML + i * (kW + 1.8), cy, kW, kH, k.label, k.value, k.unit, k.accent))
   cy += kH + 3.5
-  // Row 2
   kpis.slice(3).forEach((k, i) =>
     drawKpiPremium(doc, ML + i * (kW + 1.8), cy, kW, kH, k.label, k.value, k.unit, k.accent))
   cy += kH + 6
 
-  // ── PARECER EXECUTIVO ───────────────────────────────────────────
   cy = sectionBanner(doc, cy, 'PARECER EXECUTIVO', '') + 3
 
-  const pareH = PH - 9 - cy - 22  // leave room for verdict
+  const pareH = PH - 9 - cy - 22
   sf(doc, VERDE_LT); sd(doc, CINZA_MD); doc.setLineWidth(0.15)
   doc.rect(ML, cy, CW, pareH, 'FD')
-  sf(doc, VERDE); doc.rect(ML, cy, 4.5, pareH, 'F')  // left bar
+  sf(doc, VERDE); doc.rect(ML, cy, 4.5, pareH, 'F')
 
-  // Checkmark circle
   sf(doc, VERDE); doc.circle(ML + 18, cy + 16, 10, 'F')
   st(doc, BRANCO); doc.setFont('helvetica', 'bold'); doc.setFontSize(14)
   doc.text('✓', ML + 18, cy + 20, { align: 'center' })
 
-  // Opinion paragraph
   const opinion = buildOpinion(tir, vpl, pf.tma, pb, pf.vidaUtil)
   st(doc, PRETO); doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
   const opLines = doc.splitTextToSize(opinion, CW - 35)
   doc.text(opLines, ML + 30, cy + 8)
 
-  // Divider
   const divY = cy + 10 + opLines.length * 4
   sd(doc, CINZA_MD); doc.setLineWidth(0.25); doc.line(ML + 8, divY, PW - MR - 5, divY)
 
-  // Mini metrics row (4 items)
   interface MetricItem { label: string; value: string; color: RGB }
   const metrics: MetricItem[] = [
-    { label: 'TIR',            value: tir ? `${num(tir, 2)}%` : '—',   color: tir && tir > pf.tma ? VERDE : VERMELHO },
-    { label: 'VPL',            value: `R$ ${brl(vpl)}`,                  color: vpl >= 0 ? VERDE : VERMELHO },
-    { label: 'Payback',        value: pb ? `${num(pb, 1)} anos` : '—',  color: LARANJA },
-    { label: 'TMA',            value: `${num(pf.tma, 2)}%`,             color: CINZA_DK },
+    { label: 'TIR',     value: tir ? `${num(tir, 2)}%` : '—',  color: tir && tir > pf.tma ? VERDE : VERMELHO },
+    { label: 'VPL',     value: `R$ ${brl(vpl)}`,                color: vpl >= 0 ? VERDE : VERMELHO             },
+    { label: 'Payback', value: pb ? `${num(pb, 1)} anos` : '—', color: LARANJA                                 },
+    { label: 'TMA',     value: `${num(pf.tma, 2)}%`,            color: CINZA_DK                                },
   ]
   const mW = (CW - 16) / 4
   metrics.forEach((m, i) => {
@@ -469,7 +417,6 @@ export async function gerarRelatorioPDF(study: Study, res: ResultadosFinanceiros
     doc.text(m.value, mx + mW / 2, my + 12.5, { align: 'center' })
   })
 
-  // Second paragraph (complementary analysis)
   const p2Y = divY + 26
   const p2 = tir && tir > pf.tma
     ? `A receita bruta estimada para o primeiro ano é de R$ ${brl(rec1)}, com geração anual projetada de ${brl(geranual)} MWh. O período de vida útil de ${pf.vidaUtil} anos permite amortização confortável do CAPEX de R$ ${brl(capex.total)}, com Receita Líquida do primeiro ano de R$ ${brl(ebitda1)}.`
@@ -479,8 +426,6 @@ export async function gerarRelatorioPDF(study: Study, res: ResultadosFinanceiros
   doc.text(p2Lines, ML + 10, p2Y)
 
   cy = PH - 9 - 19
-
-  // ── VERDICT BANNER ──────────────────────────────────────────────
   sf(doc, isViavel ? VERDE : VERMELHO); doc.rect(ML, cy, CW, 16, 'F')
   st(doc, BRANCO); doc.setFont('helvetica', 'bold'); doc.setFontSize(12)
   doc.text(
@@ -502,77 +447,61 @@ export async function gerarRelatorioPDF(study: Study, res: ResultadosFinanceiros
   const c1W = 56, c2W = 56, c3W = 70
   const c1X = ML, c2X = ML + c1W + 4, c3X = c2X + c2W + 4
 
-  // ── Col 1: Premissas Técnicas ───────────────────────────────────
   let c1Y = drawColHeader(doc, c1X, cy, c1W, 'PREMISSAS TÉCNICAS')
   const tecItems: [string, string][] = [
-    ['Fonte de Energia',       FONTE_LABELS[ativo.fonte] ?? ativo.fonte],
+    ['Fonte de Energia',                FONTE_LABELS[ativo.fonte] ?? ativo.fonte],
     [`Potência Instalada (${potUnit})`, `${brl(ativo.potencia)} ${potUnit}`],
-    ['Fator de Capacidade',    `${num(ativo.fatorCapacidade, 2)}%`],
-    ['Tipo de GD',             ativo.tipoGD],
-    ['Concessionária',         ativo.concessionaria || '—'],
-    ['Geração Mensal',         `${num(geramens, 1)} MWh`],
-    ['Geração Anual',          `${brl(geranual)} MWh`],
-    ['Consumo Anual (MWh)',     `${num((ativo.consumoAnualUG ?? 0) / 1000, 1)} MWh`],
+    ['Fator de Capacidade',             `${num(ativo.fatorCapacidade, 2)}%`],
+    ['Tipo de GD',                      ativo.tipoGD],
+    ['Concessionária',                  ativo.concessionaria || '—'],
+    ['Geração Mensal',                  `${num(geramens, 1)} MWh`],
+    ['Geração Anual',                   `${brl(geranual)} MWh`],
+    ['Consumo Anual (MWh)',              `${num((ativo.consumoAnualUG ?? 0) / 1000, 1)} MWh`],
   ]
   const rowH = 11
-  tecItems.forEach(([l, v], i) => {
-    drawDataCard(doc, c1X, c1Y, c1W, rowH, l, v, i % 2 === 0, VERDE)
-    c1Y += rowH
-  })
+  tecItems.forEach(([l, v], i) => { drawDataCard(doc, c1X, c1Y, c1W, rowH, l, v, i % 2 === 0, VERDE); c1Y += rowH })
 
-  // ── Col 2: Premissas Financeiras ────────────────────────────────
   let c2Y = drawColHeader(doc, c2X, cy, c2W, 'PREMISSAS FINANCEIRAS')
   const finItems: [string, string][] = [
-    ['TUSD G',                 `R$ ${num(tarifas.tusdG, 4)}/kW`],
-    ['Tarifa de Venda',        `R$ ${num(tarifas.tarifaVenda, 2)}/MWh`],
-    ['Reajuste Anual',         `${num(tarifas.reajusteAnual, 2)}%`],
-    ['PIS',                    `${num(tributos.pis, 2)}%`],
-    ['COFINS',                 `${num(tributos.cofins, 2)}%`],
-    ['ICMS',                   `${num(tributos.icms, 2)}%`],
-    ['Tributos s/ Receita',    `${num(tributos.tributosReceita, 2)}%`],
-    ['TMA',                    `${num(pf.tma, 2)}% a.a.`],
-    ['SELIC',                  `${num(pf.selic, 2)}% a.a.`],
-    ['IPCA',                   `${num(pf.inflacao, 2)}% a.a.`],
-    ['Vida Útil',              `${pf.vidaUtil} anos`],
+    ['TUSD G',              `R$ ${num(tarifas.tusdG, 4)}/kW`],
+    ['Tarifa de Venda',     `R$ ${num(tarifas.tarifaVenda, 2)}/MWh`],
+    ['Reajuste Anual',      `${num(tarifas.reajusteAnual, 2)}%`],
+    ['PIS',                 `${num(tributos.pis, 2)}%`],
+    ['COFINS',              `${num(tributos.cofins, 2)}%`],
+    ['ICMS',                `${num(tributos.icms, 2)}%`],
+    ['Tributos s/ Receita', `${num(tributos.tributosReceita, 2)}%`],
+    ['TMA',                 `${num(pf.tma, 2)}% a.a.`],
+    ['SELIC',               `${num(pf.selic, 2)}% a.a.`],
+    ['IPCA',                `${num(pf.inflacao, 2)}% a.a.`],
+    ['Vida Útil',           `${pf.vidaUtil} anos`],
   ]
-  finItems.forEach(([l, v], i) => {
-    drawDataCard(doc, c2X, c2Y, c2W, rowH, l, v, i % 2 === 0, LARANJA)
-    c2Y += rowH
-  })
+  finItems.forEach(([l, v], i) => { drawDataCard(doc, c2X, c2Y, c2W, rowH, l, v, i % 2 === 0, LARANJA); c2Y += rowH })
 
-  // OPEX
   c2Y += 3
-  c2Y = drawColHeader(doc, c2X, c2Y, c2W, 'OPEX (% CAPEX)') + 0
+  c2Y = drawColHeader(doc, c2X, c2Y, c2W, 'OPEX (% CAPEX)')
   const opexItems: [string, string][] = [
-    ['Operação',               `${num(opex.operacao, 2)}%`],
-    ['Manutenção',             `${num(opex.manutencao, 2)}%`],
-    ['Seguro',                 `${num(opex.seguro, 2)}%`],
-    ['Gestão (% Receita)',     `${num(opex.gestao, 2)}%`],
-    ['Arrendamento/mês',       `R$ ${brl(opex.arrendamento)}`],
-    ['Gestão Fixo/mês',        `R$ ${brl(opex.fixoGestao)}`],
+    ['Operação',           `${num(opex.operacao, 2)}%`],
+    ['Manutenção',         `${num(opex.manutencao, 2)}%`],
+    ['Seguro',             `${num(opex.seguro, 2)}%`],
+    ['Gestão (% Receita)', `${num(opex.gestao, 2)}%`],
+    ['Arrendamento/mês',   `R$ ${brl(opex.arrendamento)}`],
+    ['Gestão Fixo/mês',    `R$ ${brl(opex.fixoGestao)}`],
   ]
-  opexItems.forEach(([l, v], i) => {
-    drawDataCard(doc, c2X, c2Y, c2W, rowH, l, v, i % 2 === 0, LARANJA)
-    c2Y += rowH
-  })
+  opexItems.forEach(([l, v], i) => { drawDataCard(doc, c2X, c2Y, c2W, rowH, l, v, i % 2 === 0, LARANJA); c2Y += rowH })
 
-  // ── Col 3: Investimentos e Destaques ────────────────────────────
   let c3Y = drawColHeader(doc, c3X, cy, c3W, 'ESTRUTURA DE INVESTIMENTO')
   const boxH = 27, boxG = 4
-
-  drawCapexBox(doc, c3X, c3Y,       c3W, boxH, 'Custo da Usina',        `R$ ${brl(capex.usina)}`)
-  drawCapexBox(doc, c3X, c3Y+boxH+boxG, c3W, boxH, 'Custo da Obra de Rede', `R$ ${brl(capex.obraRede)}`)
-  drawCapexBox(doc, c3X, c3Y+2*(boxH+boxG), c3W, boxH, 'TOTAL DO INVESTIMENTO',  `R$ ${brl(capex.total)}`, true)
+  drawCapexBox(doc, c3X, c3Y,              c3W, boxH, 'Custo da Usina',        `R$ ${brl(capex.usina)}`)
+  drawCapexBox(doc, c3X, c3Y+boxH+boxG,   c3W, boxH, 'Custo da Obra de Rede', `R$ ${brl(capex.obraRede)}`)
+  drawCapexBox(doc, c3X, c3Y+2*(boxH+boxG), c3W, boxH, 'TOTAL DO INVESTIMENTO', `R$ ${brl(capex.total)}`, true)
   c3Y += 3 * (boxH + boxG) + 4
 
-  // OPEX Ano 1 box
   const opexRow1 = allRows.find(r => r.ano === 1)
   if (opexRow1) {
     drawCapexBox(doc, c3X, c3Y, c3W, boxH, 'OPEX Total – Ano 1', `R$ ${brl(opexRow1.opexTotal)}`)
     c3Y += boxH + boxG
   }
 
-  // Small financial note
   const noteY = c3Y + 3
   sf(doc, CINZA_BG); doc.rect(c3X, noteY, c3W, 20, 'F')
   sf(doc, LARANJA); doc.rect(c3X, noteY, 2.5, 20, 'F')
@@ -583,57 +512,57 @@ export async function gerarRelatorioPDF(study: Study, res: ResultadosFinanceiros
   st(doc, CINZA_DK); doc.setFont('helvetica', 'normal'); doc.setFontSize(5.8)
   doc.text(`Rec. Líquida: R$ ${brl(ebitda1)}`, c3X + 6, noteY + 18)
 
-  // ── DESTAQUES DO PROJETO ─────────────────────────────────────────
+  // ── DESTAQUES DO PROJETO ────────────────────────────────────────
   const maxColEnd = Math.max(c1Y, c2Y) + 6
   cy = maxColEnd
   cy = sectionBanner(doc, cy, 'DESTAQUES DO PROJETO', '9 indicadores-chave') + 4
 
   interface DstDef { label: string; value: string; unit: string; accent: Accent }
   const dstItems: DstDef[] = [
-    { label: 'Rec. Bruta Ano 1',               value: `R$ ${brl(rec1)}`,                  unit: '',                              accent: 'green'  },
-    { label: 'Rec. Líquida Ano 1',             value: `R$ ${brl(ebitda1)}`,               unit: 'Rec. Bruta − Tributos − OPEX',  accent: 'green'  },
-    { label: 'TIR (% a.a.)',                   value: tir ? `${num(tir, 2)}%` : '—',     unit: `TMA: ${num(pf.tma, 2)}%`,      accent: tir && tir > pf.tma ? 'orange' : 'red' },
-    { label: 'VPL',                            value: `R$ ${brl(vpl)}`,                   unit: 'Valor Presente Líquido',        accent: vpl >= 0 ? 'green' : 'red' },
-    { label: 'Payback Simples',                value: pb ? `${num(pb, 1)} anos` : '—',   unit: 'Retorno do capital',            accent: 'orange' },
-    { label: `Rec. Bruta Ano ${anoLast?.ano ?? pf.vidaUtil}`, value: `R$ ${brl(recBrutaLast)}`, unit: 'Último ano',            accent: 'green'  },
-    { label: `Rec. Líq. Ano ${anoLast?.ano ?? pf.vidaUtil}`,  value: `R$ ${brl(recLiqLast)}`,  unit: 'Último ano',            accent: 'orange' },
-    { label: 'Rec. Líquida Acumulada',         value: `R$ ${brl(ebitdaAcum)}`,            unit: `Ciclo ${pf.vidaUtil} anos`,     accent: 'orange' },
-    { label: 'Receita Acumulada',              value: `R$ ${brl(recBrutaAcum)}`,          unit: `Ciclo ${pf.vidaUtil} anos`,     accent: 'green'  },
+    { label: 'Rec. Bruta Ano 1',                                              value: `R$ ${brl(rec1)}`,         unit: '',                             accent: 'green'                                  },
+    { label: 'Rec. Líquida Ano 1',                                            value: `R$ ${brl(ebitda1)}`,      unit: 'Rec. Bruta − Tributos − OPEX', accent: 'green'                                  },
+    { label: 'TIR (% a.a.)',                                                  value: tir ? `${num(tir, 2)}%` : '—', unit: `TMA: ${num(pf.tma, 2)}%`, accent: tir && tir > pf.tma ? 'orange' : 'red'  },
+    { label: 'VPL',                                                           value: `R$ ${brl(vpl)}`,          unit: 'Valor Presente Líquido',        accent: vpl >= 0 ? 'green' : 'red'              },
+    { label: 'Payback Simples',                                               value: pb ? `${num(pb, 1)} anos` : '—', unit: 'Retorno do capital',     accent: 'orange'                                 },
+    { label: `Rec. Bruta Ano ${anoLast?.ano ?? pf.vidaUtil}`,                value: `R$ ${brl(recBrutaLast)}`, unit: 'Último ano',                    accent: 'green'                                  },
+    { label: `Rec. Líq. Ano ${anoLast?.ano ?? pf.vidaUtil}`,                 value: `R$ ${brl(recLiqLast)}`,   unit: 'Último ano',                    accent: 'orange'                                 },
+    { label: 'Rec. Líquida Acumulada',                                        value: `R$ ${brl(ebitdaAcum)}`,   unit: `Ciclo ${pf.vidaUtil} anos`,     accent: 'orange'                                 },
+    { label: 'Receita Acumulada',                                             value: `R$ ${brl(recBrutaAcum)}`, unit: `Ciclo ${pf.vidaUtil} anos`,     accent: 'green'                                  },
   ]
 
   const dstCols = 3
   const dstW    = (CW - (dstCols - 1) * 2) / dstCols
-  const dstH    = PH - 9 - cy - 4
-  const dstRowH = Math.min(dstH / 3 - 1.5, 30)
+  const dstRowH = 27
 
   dstItems.forEach((item, idx) => {
     const row = Math.floor(idx / dstCols)
     const col = idx % dstCols
-    const dx  = ML + col * (dstW + 2)
-    const dy  = cy + row * (dstRowH + 2)
-    drawKpiPremium(doc, dx, dy, dstW, dstRowH, item.label, item.value, item.unit, item.accent)
+    drawKpiPremium(doc, ML + col * (dstW + 2), cy + row * (dstRowH + 2), dstW, dstRowH, item.label, item.value, item.unit, item.accent)
   })
 
   drawFooter(doc, 2)
 
   /* ╔══════════════════════════════════════════════════════════════╗
-     ║  PÁGINA 3 — DESEMPENHO FINANCEIRO                            ║
+     ║  PÁGINA 3 — TABELA FINANCEIRA + 2 GRÁFICOS                   ║
      ╚══════════════════════════════════════════════════════════════╝ */
   doc.addPage()
   drawCompactHeader(doc, study)
 
   cy = 22
-  cy = sectionBanner(doc, cy, 'DESEMPENHO FINANCEIRO', 'Projeção anual do período de vida útil') + 3
+  cy = sectionBanner(doc, cy, 'RESUMO FINANCEIRO EM VALORES', 'Projeção anual — R$') + 3
 
-  // ── Tabela financeira (5 colunas) ───────────────────────────────
-  // Build display rows: all years
+  // Mostrar todos os anos (até 10) + último
+  const tableRows = allRows.length > 11
+    ? [...allRows.slice(0, 10), allRows[allRows.length - 1]]
+    : allRows
+
   autoTable(doc, {
     startY: cy,
     margin: { left: ML, right: MR },
     tableWidth: CW,
-    head: [['ANO', 'RECEITA BRUTA', 'TRIBUTOS', 'OPEX TOTAL', 'RECEITA LÍQUIDA']],
-    body: allRows.map(r => [
-      `${r.ano}`,
+    head: [['ANO', 'REC. BRUTA', 'TRIBUTOS', 'OPEX TOTAL', 'REC. LÍQUIDA']],
+    body: tableRows.map((r, i) => [
+      i === 10 && allRows.length > 11 ? `${r.ano} ★` : `${r.ano}`,
       `R$ ${brl(r.receitaBruta)}`,
       `R$ ${brl(r.tributos)}`,
       `R$ ${brl(r.opexTotal)}`,
@@ -641,69 +570,53 @@ export async function gerarRelatorioPDF(study: Study, res: ResultadosFinanceiros
     ]),
     headStyles: {
       fillColor: rgb3(VERDE), textColor: rgb3(BRANCO),
-      fontSize: 7.5, fontStyle: 'bold', halign: 'center', cellPadding: 3.5,
+      fontSize: 7, fontStyle: 'bold', halign: 'center', cellPadding: 3,
     },
-    bodyStyles: { fontSize: 7.5, cellPadding: 3.5, halign: 'right' },
+    bodyStyles: { fontSize: 7, cellPadding: 3, halign: 'right' },
     columnStyles: {
-      0: { halign: 'center', cellWidth: 18, fontStyle: 'bold' },
-      1: { cellWidth: CW * 0.22 },
+      0: { halign: 'center', cellWidth: 16, fontStyle: 'bold' },
+      1: { cellWidth: CW * 0.23 },
       2: { cellWidth: CW * 0.19 },
       3: { cellWidth: CW * 0.20 },
-      4: { cellWidth: CW * 0.24, textColor: rgb3(VERDE), fontStyle: 'bold' },
+      4: { textColor: rgb3(VERDE), fontStyle: 'bold' },
     },
     alternateRowStyles: { fillColor: rgb3(CINZA_BG) },
     theme: 'plain',
-    didDrawPage: () => { /* noop */ },
   })
 
-  const tableBottom = finalY(doc)
+  cy = finalY(doc) + 7
 
-  // ── 3 gráficos empilhados verticalmente ─────────────────────────
-  const chartStart  = tableBottom + 6
-  const chartBottom = PH - 9 - 2
-  const totalH      = chartBottom - chartStart
-  const chartH      = (totalH - 6) / 3   // 3 charts + 2 gaps of 3mm
-  const chartW      = CW
-
+  // ── 2 GRÁFICOS ──────────────────────────────────────────────────
   const chartRows = allRows.slice(0, pf.vidaUtil)
   const fluxoRows = [
     { ano: 0, fluxo: res.tabela[0]?.fluxoAcumulado ?? -res.capex },
     ...chartRows.map(r => ({ ano: r.ano, fluxo: r.fluxoAcumulado })),
   ]
 
-  // Chart 1 — Receita Líquida por Ano
+  // Espaço disponível para 2 gráficos
+  const footerH  = 9
+  const available = PH - footerH - cy - 8
+  const chartH    = (available - 4) / 2   // 2 gráficos + 1 gap
+
+  // Gráfico 1 — Receita Líquida por Ano
   sf(doc, CINZA_BG); sd(doc, CINZA_MD); doc.setLineWidth(0.2)
-  doc.rect(ML, chartStart, chartW, chartH, 'FD')
+  doc.rect(ML, cy, CW, chartH, 'FD')
   drawBarChart(
-    doc, ML, chartStart, chartW, chartH,
+    doc, ML, cy, CW, chartH,
     'Receita Líquida por Ano (R$)',
     chartRows.map(r => r.ano),
-    [{ label: 'Receita Líquida',          values: chartRows.map(r => r.ebitda), color: VERDE }],
+    [{ label: 'Receita Líquida', values: chartRows.map(r => r.ebitda), color: VERDE }],
   )
 
-  // Chart 2 — Receita Bruta vs OPEX
-  const ch2Y = chartStart + chartH + 3
+  // Gráfico 2 — Fluxo de Caixa Acumulado
+  const ch2Y = cy + chartH + 4
   sf(doc, CINZA_BG); sd(doc, CINZA_MD); doc.setLineWidth(0.2)
-  doc.rect(ML, ch2Y, chartW, chartH, 'FD')
+  doc.rect(ML, ch2Y, CW, chartH, 'FD')
   drawBarChart(
-    doc, ML, ch2Y, chartW, chartH,
-    'Evolução da Receita Bruta e OPEX (R$)',
-    chartRows.map(r => r.ano),
-    [
-      { label: 'Receita Bruta', values: chartRows.map(r => r.receitaBruta), color: LARANJA },
-      { label: 'OPEX Total',    values: chartRows.map(r => r.opexTotal),    color: CINZA_MD },
-    ],
-  )
-
-  // Chart 3 — Fluxo Acumulado
-  const ch3Y = ch2Y + chartH + 3
-  sf(doc, CINZA_BG); sd(doc, CINZA_MD); doc.setLineWidth(0.2)
-  doc.rect(ML, ch3Y, chartW, chartH, 'FD')
-  drawBarChart(
-    doc, ML, ch3Y, chartW, chartH,
+    doc, ML, ch2Y, CW, chartH,
     'Fluxo de Caixa Acumulado (R$)',
     fluxoRows.map(r => r.ano),
-    [{ label: 'Fluxo Acumulado', values: fluxoRows.map(r => r.fluxo), color: VERDE }],
+    [{ label: 'Fluxo Acumulado', values: fluxoRows.map(r => r.fluxo), color: LARANJA }],
   )
 
   drawFooter(doc, 3)
